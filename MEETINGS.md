@@ -35,7 +35,7 @@
 | Harry | Filter trash APIs from high-value ones | Feb 14 |
 | Harry | Create HARRY.md with domain expertise and thoughts | Feb 14 |
 | Marina | Find high-value URL domains for document sources | Feb 14 |
-| Marina | Download and convert 100+ validation papers (paper-to-md) | Feb 17 |
+| Harry | Download and convert 100+ validation papers (paper-to-md) | Feb 17 |
 | Marina | Create MARINA.md with domain expertise and thoughts | Feb 14 |
 | Anthony | Continue phased implementation per ROADMAP.md | Ongoing |
 | Anthony | Make architecture more flexible for "any domain" | Feb 16 |
