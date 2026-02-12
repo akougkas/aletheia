@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aletheia-db
+    environment:
+      POSTGRES_USER: aletheia
+      POSTGRES_PASSWORD: aletheia
+      POSTGRES_DB: aletheia
+    ports:
+      - "5432:5432"
+    volumes:
+      - aletheia_pgdata:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aletheia"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  aletheia_pgdata:
