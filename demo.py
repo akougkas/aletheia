@@ -41,9 +41,9 @@ DEMO_CLAIMS = [
 
 
 def print_header():
-    print(f"\n{BOLD}{'='*70}{RESET}")
+    print(f"\n{BOLD}{'=' * 70}{RESET}")
     print(f"{BOLD}  ALETHEIA - Methodology-Aware Policy Intelligence Demo{RESET}")
-    print(f"{BOLD}{'='*70}{RESET}")
+    print(f"{BOLD}{'=' * 70}{RESET}")
     print(f"""
 {GRAY}ALETHEIA bridges two disconnected worlds:{RESET}
   1. Statistical anomaly detection (finds unusual patterns)
@@ -89,10 +89,10 @@ async def run_demo():
 
     try:
         for i, case in enumerate(DEMO_CLAIMS, 1):
-            print(f"\n{BOLD}{'='*70}{RESET}")
+            print(f"\n{BOLD}{'=' * 70}{RESET}")
             print(f"{BOLD}{case['title']}{RESET}")
-            print(f"{'='*70}")
-            print(f"\n{BLUE}Claim:{RESET} \"{case['claim']}\"")
+            print(f"{'=' * 70}")
+            print(f'\n{BLUE}Claim:{RESET} "{case["claim"]}"')
             print(f"\n{GRAY}Analyzing...{RESET}")
 
             verdict = await orchestrator.process_claim(case["claim"])
@@ -104,9 +104,9 @@ async def run_demo():
     finally:
         await orchestrator.close()
 
-    print(f"\n{BOLD}{'='*70}{RESET}")
+    print(f"\n{BOLD}{'=' * 70}{RESET}")
     print(f"{BOLD}  Demo Complete{RESET}")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
     print(f"""
 {GRAY}Key Takeaways:{RESET}
   1. ALETHEIA parses natural language claims into structured queries
@@ -117,7 +117,7 @@ async def run_demo():
 {GRAY}Next Steps:{RESET}
   - Add real-time data retrieval from BLS, Census, FRED APIs
   - Implement statistical break detection (Chow test, CUSUM)
-  - Train embeddings on methodology corpus for semantic search
+  - Ingest methodology documents (pgai vectorizer auto-generates embeddings)
   - Build the Watchdog agent for continuous monitoring
 """)
 
@@ -130,10 +130,10 @@ async def run_quick_demo():
 
     try:
         for i, case in enumerate(DEMO_CLAIMS, 1):
-            print(f"\n{BOLD}{'='*70}{RESET}")
+            print(f"\n{BOLD}{'=' * 70}{RESET}")
             print(f"{BOLD}{case['title']}{RESET}")
-            print(f"{'='*70}")
-            print(f"\n{BLUE}Claim:{RESET} \"{case['claim']}\"")
+            print(f"{'=' * 70}")
+            print(f'\n{BLUE}Claim:{RESET} "{case["claim"]}"')
             print(f"\n{GRAY}Analyzing...{RESET}")
 
             verdict = await orchestrator.process_claim(case["claim"])
@@ -148,6 +148,7 @@ async def run_quick_demo():
 
 if __name__ == "__main__":
     import sys
+
     if "--quick" in sys.argv or "-q" in sys.argv:
         asyncio.run(run_quick_demo())
     else:

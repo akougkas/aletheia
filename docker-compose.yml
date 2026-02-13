@@ -17,5 +17,16 @@ services:
       timeout: 5s
       retries: 5
 
+  vectorizer-worker:
+    image: timescale/pgai-vectorizer-worker:latest
+    container_name: aletheia-vectorizer
+    environment:
+      PGAI_VECTORIZER_WORKER_DB_URL: postgres://aletheia:aletheia@postgres:5432/aletheia
+      OPENAI_API_KEY: "not-needed"
+      OPENAI_BASE_URL: "http://mini:8080/v1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   aletheia_pgdata:

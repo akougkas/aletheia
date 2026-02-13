@@ -69,7 +69,7 @@ ALETHEIA catches these breaks because it reads methodology documentation AND con
 
 We're in early development. The current version demonstrates:
 - Claim parsing (natural language → structured query)
-- Knowledge graph search (10 seeded methodology break cases)
+- Knowledge graph search with pgai-managed vector embeddings (10 seeded methodology break cases)
 - Verdict synthesis (supported / partially supported / misleading)
 
 See [ROADMAP.md](ROADMAP.md) for the development plan.
@@ -79,9 +79,12 @@ See [ROADMAP.md](ROADMAP.md) for the development plan.
 ```bash
 # Prerequisites: Docker, Python 3.11+, uv, access to mini:8080 (llama.cpp)
 
-docker compose up -d              # Start PostgreSQL
-uv sync                           # Install dependencies
-uv run python demo.py --quick     # Run the demo
+docker compose up -d                        # Start PostgreSQL + pgai vectorizer worker
+uv sync                                     # Install dependencies
+uv run python -c "from aletheia.db import install_pgai; install_pgai()"  # Bootstrap pgai
+psql postgres://aletheia:aletheia@localhost:5432/aletheia -f sql/seed_cases.sql  # Seed data
+uv run python -m aletheia.vectorizer        # Create embedding vectorizers
+uv run python demo.py --quick               # Run the demo
 ```
 
 The demo walks through three validated cases showing methodology breaks in official statistics.
