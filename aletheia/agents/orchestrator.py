@@ -1,15 +1,26 @@
 """Chief Analyst (Orchestrator) - coordinates the multi-agent pipeline."""
 
-import asyncio
-from typing import Optional
 from datetime import datetime
 
 from aletheia.agents.base import Agent
-from aletheia.agents.parser import ClaimParserAgent
-from aletheia.agents.archivist import ArchivistAgent
 from aletheia.agents.analyst import AnalystAgent
+from aletheia.agents.archivist import ArchivistAgent
 from aletheia.agents.editor import EditorAgent
-from aletheia.schema import PolicyClaim, Verdict, AgentMessage
+from aletheia.agents.parser import ClaimParserAgent
+from aletheia.evidence import (
+    ClaimRouter,
+    DataApiEvidenceSource,
+    DocumentIndexEvidenceSource,
+    EvidenceAggregator,
+    EvidencePipeline,
+    MethodologyEvidenceSource,
+    ScholarPaperEvidenceSource,
+    WebSearchEvidenceSource,
+)
+from aletheia.retrieval_store import RetrievalStore
+from aletheia.schema import AgentMessage, PolicyClaim, Verdict
+from aletheia.source_registry import SourceRegistry
+from aletheia.web_search import WebSearchClient
 
 
 class OrchestratorAgent(Agent):
@@ -25,6 +36,28 @@ class OrchestratorAgent(Agent):
         self.archivist = ArchivistAgent()
         self.analyst = AnalystAgent()
         self.editor = EditorAgent()
+        self.source_registry = SourceRegistry.default()
+        self.retrieval_store = RetrievalStore()
+        self.router = ClaimRouter()
+        self.web_search_client = WebSearchClient()
+        self.evidence_pipeline = EvidencePipeline(
+            router=self.router,
+            sources={
+                "methodology_kb": MethodologyEvidenceSource(self.archivist),
+                "document_index": DocumentIndexEvidenceSource(self.archivist),
+                "data_api": DataApiEvidenceSource(self.analyst),
+                "web_fallback": WebSearchEvidenceSource(
+                    search_client=self.web_search_client,
+                    retrieval_store=self.retrieval_store,
+                ),
+                "paper_scholar": ScholarPaperEvidenceSource(
+                    search_client=self.web_search_client,
+                    retrieval_store=self.retrieval_store,
+                ),
+            },
+            aggregator=EvidenceAggregator(self.source_registry),
+            retrieval_store=self.retrieval_store,
+        )
         self.trace: list[AgentMessage] = []
 
     def _log_message(self, sender: str, receiver: str, msg_type: str, payload: str):
@@ -59,23 +92,64 @@ class OrchestratorAgent(Agent):
         self._log_message("Auditor", "ChiefAnalyst", "response", claim.model_dump_json())
         self.log(f"Parsed claim: indicator={claim.indicator}, dataset={claim.dataset}")
 
-        # Step 2: Query knowledge base for methodology breaks (parallel with data fetch)
-        self._log_message("ChiefAnalyst", "Archivist", "request", f"Find breaks for {claim.dataset}")
-        self._log_message("ChiefAnalyst", "Analyst", "request", f"Fetch data for {claim.indicator}")
+        # Step 2: Route claim to source strategy and aggregate evidence.
+        self._log_message("ChiefAnalyst", "Router", "request", "Select evidence strategy")
+        aggregated = await self.evidence_pipeline.collect(claim)
+        breaks = aggregated.breaks
+        analysis = dict(aggregated.analysis)
+        evidence_docs = aggregated.evidence_docs
 
-        # Run archivist and analyst in parallel
-        breaks_task = self.archivist.find_breaks(claim)
-        analysis_task = self.analyst.analyze(claim)
+        analysis["routing"] = {
+            "claim_type": aggregated.plan.claim_type.value,
+            "sources": aggregated.plan.source_ids,
+            "fallback_source_id": aggregated.plan.fallback_source_id,
+            "deep_research_source_ids": aggregated.plan.deep_research_source_ids,
+        }
+        analysis["evidence_aggregate_confidence"] = aggregated.aggregate_confidence
+        analysis["fallback_used"] = aggregated.fallback_used
 
-        breaks, analysis = await asyncio.gather(breaks_task, analysis_task)
+        self._log_message(
+            "Router",
+            "ChiefAnalyst",
+            "response",
+            (
+                f"type={aggregated.plan.claim_type.value} "
+                f"sources={aggregated.plan.source_ids} "
+                f"fallback={aggregated.plan.fallback_source_id}"
+            ),
+        )
+        for output in aggregated.source_outputs:
+            self._log_message(
+                output.source_id,
+                "ChiefAnalyst",
+                "response",
+                (
+                    f"breaks={len(output.breaks)} docs={len(output.evidence_docs)} "
+                    f"errors={len(output.errors)}"
+                ),
+            )
+
+        decomposition = self.analyst.quantify_methodology_vs_reality(
+            claim=claim,
+            breaks=breaks,
+            analysis=analysis,
+        )
+        if decomposition:
+            analysis["methodology_vs_real"] = decomposition
 
         self._log_message("Archivist", "ChiefAnalyst", "response", f"Found {len(breaks)} breaks")
         self._log_message("Analyst", "ChiefAnalyst", "response", str(analysis))
+        self._log_message("Aggregator", "ChiefAnalyst", "response", f"Ranked {len(evidence_docs)} evidence snippets")
         self.log(f"Found {len(breaks)} methodology breaks")
 
         # Step 3: Synthesize verdict
         self._log_message("ChiefAnalyst", "Editor", "request", "Synthesize verdict")
-        verdict = await self.editor.synthesize(claim, breaks, analysis)
+        verdict = await self.editor.synthesize(
+            claim,
+            breaks,
+            analysis,
+            evidence_docs=evidence_docs,
+        )
         self._log_message("Editor", "ChiefAnalyst", "response", verdict.status.value)
 
         self.log(f"Verdict: {verdict.status.value}")
@@ -83,6 +157,8 @@ class OrchestratorAgent(Agent):
 
     async def close(self):
         """Clean up resources."""
+        await self.analyst.close()
+        await self.evidence_pipeline.close()
         await self.llm.close()
         # All agents share the same default llm client, so closing once is enough
 

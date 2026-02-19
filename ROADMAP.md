@@ -1,6 +1,6 @@
 # ALETHEIA Roadmap
 
-> Last updated: 2025-02-12
+> Last updated: 2026-02-19
 
 ## Demo Day Target (1 week: Feb 19, 2025)
 
@@ -14,7 +14,7 @@
 
 ---
 
-## Phase 1: Foundation ✅ (Current)
+## Phase 1: Foundation ✅
 
 **Status**: Complete
 
@@ -25,7 +25,7 @@
 | LLM client (llama.cpp) | ✅ Done | Connects to mini:8080 |
 | Claim Parser agent | ✅ Done | Extracts structured claims from natural language |
 | Archivist agent | ✅ Done | Queries knowledge graph for methodology breaks |
-| Analyst agent | ⚠️ Stub | Data retrieval not yet implemented |
+| Analyst agent | ✅ Done | Live connectors for BLS/FRED/Census/Eurostat/ECB |
 | Editor agent | ✅ Done | Synthesizes verdicts |
 | Orchestrator | ✅ Done | Coordinates agent pipeline |
 | CLI + Demo | ✅ Done | Interactive and presentation modes |
@@ -33,34 +33,45 @@
 
 ---
 
-## Phase 2: Flexibility & Scale (This Week)
+## Phase 2: Flexibility & Scale ✅
 
-**Goal**: Make the system work for "any claim, any domain"
+**Goal**: Make the system work for "any claim, any domain" with local-first baseline and optional enhanced providers.
 
 ### Architecture Changes Needed
 
-- [ ] **Pluggable evidence sources**: Abstract the knowledge base to support:
+- [x] **Pluggable evidence sources**:
   - Methodology documents (current)
-  - Academic papers (new)
-  - Data APIs (BLS, FRED, ECB, etc.)
-  - Web search fallback
+  - Academic papers (Google Scholar via SERP API, optional)
+  - Data APIs (BLS, FRED, ECB, Census, Eurostat)
+  - Web search fallback (Google/Brave/DDG chain)
 
-- [ ] **Pluggable validators**: The Editor should be able to use different validation strategies:
-  - Methodology break detection (current)
-  - Statistical fact-checking
-  - Source credibility assessment
-  - Consensus across multiple papers
+- [x] **Deterministic routing + aggregation**:
+  - Claim router selects source strategy by claim type
+  - Evidence aggregator scores relevance/confidence
+  - Fallback and deep-research paths are explicit and auditable
 
-- [ ] **Generic claim-evidence schema**: Current schema is methodology-specific. Need:
-  - Generic "evidence" table that can hold any type
-  - Claim-evidence linking with relevance scores
-  - Multi-source aggregation
+- [x] **Retrieval memory + observability**:
+  - Retrieval run history and linked evidence docs
+  - Cache hit tracking
+  - Provider/source budget skip metrics
+  - CLI diagnostics (`db-doctor`, `retrieval-stats`)
 
-### Content Ingestion
+### Content Ingestion (Phase 2 outcome)
 
-- [ ] **Paper-to-markdown pipeline**: Convert academic PDFs to searchable text
-- [ ] **Embedding pipeline**: Generate vectors for semantic search
-- [ ] **Source registry**: Track which sources are trusted for which domains
+- [x] **Paper/web ingestion pipeline**:
+  - Search -> fetch -> clean -> chunk -> index
+  - Optional Crawl4AI fallback for weak/blocked pages
+- [x] **Embedding pipeline**:
+  - pgai vectorizer-backed semantic retrieval
+- [x] **Source registry**:
+  - Trusted source metadata and confidence priors
+
+### MVP Deployment & Onboarding (cross-platform)
+
+- [x] Local-first default mode (no API keys required)
+- [x] Optional enhanced mode (keys add coverage, not required)
+- [x] DB auth diagnostics + reset-friendly workflow for research environments
+- [ ] Add a single onboarding command wrapper (future polish)
 
 ### Team Action Items
 
@@ -81,9 +92,10 @@
 
 - [ ] Fine-tune embedding model on methodology corpus
 - [ ] Add statistical break detection (Chow test, CUSUM)
-- [ ] Implement real API integrations
+- [x] Implement real API integrations
 - [ ] Adversarial testing with rephrased claims
 - [ ] Cross-domain generalization tests
+- [ ] CLI UX polish and demo narrative flow for presentation
 
 ---
 
@@ -126,14 +138,26 @@ Claim → Parser → Router → [Multiple Evidence Sources] → Aggregator → E
                  KG         Index     (FRED, etc.)
 ```
 
+### Current Implementation Snapshot
+
+```
+Claim -> Parser -> Router -> Sources (KB + APIs + Web + Scholar*) -> Aggregator -> Editor
+                                  |                   |
+                                  +-> Retrieval memory/index + diagnostics
+                                  +-> Deep research only on ambiguous evidence
+
+* Scholar uses SERP API key when available; baseline runs without it.
+```
+
 ---
 
 ## Open Questions
 
 1. **Scope boundaries**: How do we decide what claims are "in scope" vs out of scope?
-2. **Confidence calibration**: How do we calibrate verdict confidence levels?
+2. **Confidence calibration**: How should we calibrate score thresholds for publication-quality evaluation?
 3. **Source weighting**: How do we weight different types of evidence?
 4. **Evaluation metrics**: What's our gold standard for "correct" validation?
+5. **Demo UX**: What CLI/UI flow best communicates methodology-aware reasoning to non-technical audiences?
 
 ---
 

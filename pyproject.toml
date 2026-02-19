@@ -5,7 +5,7 @@ description = "Methodology-aware multi-agent intelligence for policy data integr
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "pgai[vectorizer-worker]",
+    "pgai",
     "psycopg[binary]>=3.1.0",
     "httpx>=0.27.0",
     "pydantic>=2.0.0",
@@ -16,7 +16,15 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
 ]
+research = [
+    "crawl4ai",
+]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires live Postgres and seeded benchmark data",
+]

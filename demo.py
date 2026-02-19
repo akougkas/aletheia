@@ -65,6 +65,10 @@ def print_verdict(verdict, expected: str):
     color = status_colors.get(verdict.status.value, RESET)
 
     print(f"\n{BOLD}VERDICT: {color}{verdict.status.value.upper()}{RESET}")
+    print(
+        f"{GRAY}Severity: {verdict.severity.value} | "
+        f"Comparability: {verdict.comparability.value}{RESET}"
+    )
     print(f"{GRAY}Expected: {expected}{RESET}")
 
     print(f"\n{BOLD}Summary:{RESET}")
@@ -77,6 +81,13 @@ def print_verdict(verdict, expected: str):
             print(f"  {YELLOW}[{date_str}]{RESET} {b.change_type.value}")
             if b.impact_estimate:
                 print(f"  {GRAY}Impact: {b.impact_estimate[:100]}...{RESET}")
+
+    if verdict.methodology_vs_real:
+        mvr = verdict.methodology_vs_real
+        print(
+            f"{GRAY}Methodology share estimate: "
+            f"{mvr.get('methodology_share_estimate', 0.0):.0%}{RESET}"
+        )
 
     print(f"\n{GRAY}Confidence: {verdict.confidence:.0%}{RESET}")
 

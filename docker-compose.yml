@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: aletheia
       POSTGRES_DB: aletheia
     ports:
-      - "5432:5432"
+      - "${ALETHEIA_DB_PORT:-5432}:5432"
     volumes:
       - aletheia_pgdata:/var/lib/postgresql/data
       - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro

@@ -36,6 +36,22 @@ class VerdictStatus(str, Enum):
     INSUFFICIENT_DATA = "insufficient_data"
 
 
+class SeverityLevel(str, Enum):
+    """Impact severity of a methodology change."""
+    MINOR = "minor"
+    MODERATE = "moderate"
+    MAJOR = "major"
+    UNKNOWN = "unknown"
+
+
+class ComparabilityLevel(str, Enum):
+    """How comparable the series remains across a break."""
+    COMPARABLE = "comparable"
+    COMPARABLE_WITH_ADJUSTMENTS = "comparable_with_adjustments"
+    NOT_COMPARABLE = "not_comparable"
+    UNCERTAIN = "uncertain"
+
+
 # === Policy Claim (Input) ===
 
 class PolicyClaim(BaseModel):
@@ -85,11 +101,14 @@ class Indicator(BaseModel):
 class MethodologyChange(BaseModel):
     """A documented methodology change."""
     id: Optional[int] = None
+    benchmark_case_id: Optional[str] = None
     dataset_id: int
     change_type: ChangeType
     effective_date: Optional[date] = None
     description: str
     impact_estimate: Optional[str] = None
+    severity: Optional[SeverityLevel] = None
+    comparability: Optional[ComparabilityLevel] = None
     is_documented: bool = True
     source_url: Optional[str] = None
 
@@ -113,6 +132,8 @@ class Verdict(BaseModel):
     claim: PolicyClaim
     status: VerdictStatus
     confidence: float = Field(ge=0.0, le=1.0)
+    severity: SeverityLevel = Field(default=SeverityLevel.UNKNOWN)
+    comparability: ComparabilityLevel = Field(default=ComparabilityLevel.UNCERTAIN)
 
     # Methodology breaks found
     breaks_found: list[MethodologyChange] = Field(default_factory=list)
@@ -123,6 +144,8 @@ class Verdict(BaseModel):
 
     # Provenance
     sources: list[str] = Field(default_factory=list)
+    evidence_snippets: list[str] = Field(default_factory=list)
 
     # Alternative interpretations
     scenarios: Optional[dict[str, str]] = None  # e.g., {"with_old_method": "...", "with_new_method": "..."}
+    methodology_vs_real: Optional[dict[str, Any]] = None

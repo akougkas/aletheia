@@ -49,11 +49,14 @@ CREATE TABLE indicators (
 -- Methodology changes (the core entity)
 CREATE TABLE methodology_changes (
     id SERIAL PRIMARY KEY,
+    benchmark_case_id VARCHAR(32) UNIQUE,
     dataset_id INTEGER REFERENCES datasets(id) NOT NULL,
     change_type VARCHAR(64) NOT NULL,
     effective_date DATE,
     description TEXT NOT NULL,
     impact_estimate TEXT,
+    severity VARCHAR(16),
+    comparability VARCHAR(48),
     is_documented BOOLEAN DEFAULT TRUE,
     source_url TEXT,
     created_at TIMESTAMP DEFAULT NOW()
@@ -98,7 +101,44 @@ CREATE TABLE change_documents (
     PRIMARY KEY (change_id, document_id)
 );
 
+-- Retrieval memory for source runs and discovered evidence indexing.
+CREATE TABLE retrieval_runs (
+    id BIGSERIAL PRIMARY KEY,
+    query_hash VARCHAR(64) NOT NULL,
+    claim_text TEXT NOT NULL,
+    claim_dataset VARCHAR(64),
+    claim_indicator TEXT,
+    claim_type VARCHAR(64),
+    status VARCHAR(32) NOT NULL DEFAULT 'running',
+    metadata JSONB,
+    started_at TIMESTAMP DEFAULT NOW(),
+    completed_at TIMESTAMP,
+    error_text TEXT
+);
+
+CREATE TABLE retrieval_run_documents (
+    retrieval_run_id BIGINT REFERENCES retrieval_runs(id) ON DELETE CASCADE NOT NULL,
+    document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE NOT NULL,
+    source_id VARCHAR(64) NOT NULL,
+    relevance_score FLOAT,
+    confidence_score FLOAT,
+    is_cached BOOLEAN DEFAULT FALSE,
+    rank INTEGER,
+    retrieved_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (retrieval_run_id, document_id)
+);
+
 -- Indexes for common queries
 CREATE INDEX idx_changes_dataset ON methodology_changes(dataset_id);
 CREATE INDEX idx_changes_date ON methodology_changes(effective_date);
+CREATE INDEX idx_changes_case_id ON methodology_changes(benchmark_case_id);
 CREATE INDEX idx_indicators_dataset ON indicators(dataset_id);
+CREATE INDEX idx_documents_url ON documents(url) WHERE url IS NOT NULL;
+CREATE UNIQUE INDEX uq_documents_content_hash
+    ON documents(content_hash)
+    WHERE content_hash IS NOT NULL;
+CREATE INDEX idx_retrieval_runs_query_hash ON retrieval_runs(query_hash);
+CREATE INDEX idx_retrieval_runs_started_at ON retrieval_runs(started_at DESC);
+CREATE INDEX idx_retrieval_docs_source ON retrieval_run_documents(source_id);
+CREATE INDEX idx_retrieval_docs_document ON retrieval_run_documents(document_id);
+CREATE INDEX idx_retrieval_docs_cached ON retrieval_run_documents(is_cached);
