@@ -1,0 +1,11 @@
+services:
+  local-ollama:
+    image: ollama/ollama:latest
+    container_name: aletheia-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - aletheia_ollama_data:/root/.ollama
+
+volumes:
+  aletheia_ollama_data:

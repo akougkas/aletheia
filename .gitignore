@@ -136,6 +136,9 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
+!.env.homelab-dev.example
 .envrc
 .venv
 env/
@@ -210,3 +213,4 @@ __marimo__/
 
 # user
 PLAN.md
+AGENTS.md

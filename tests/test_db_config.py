@@ -37,3 +37,10 @@ def test_diagnose_connection_failure_detects_auth_issue():
     diag = diagnose_connection_failure(exc)
     assert diag["category"] == "auth_failed"
     assert any("Credentials mismatch" in hint for hint in diag["hints"])
+
+
+def test_diagnose_connection_failure_detects_unusable_connection():
+    exc = RuntimeError("connection is bad: no error details available")
+    diag = diagnose_connection_failure(exc)
+    assert diag["category"] == "connection_unusable"
+    assert any("ALETHEIA_DB_PORT" in hint for hint in diag["hints"])

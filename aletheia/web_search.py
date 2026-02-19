@@ -30,7 +30,7 @@ class WebSearchClient:
         self.provider = os.environ.get("ALETHEIA_WEB_SEARCH_PROVIDER", "auto").lower()
         chain = os.environ.get(
             "ALETHEIA_WEB_SEARCH_CHAIN",
-            "google,brave,duckduckgo",
+            "brave,duckduckgo,google",
         )
         self.provider_chain = [item.strip().lower() for item in chain.split(",") if item.strip()]
         self.max_fetch_chars = int(os.environ.get("ALETHEIA_WEB_FETCH_MAX_CHARS", "6000"))

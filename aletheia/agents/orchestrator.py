@@ -1,6 +1,7 @@
 """Chief Analyst (Orchestrator) - coordinates the multi-agent pipeline."""
 
 from datetime import datetime
+from typing import Any
 
 from aletheia.agents.base import Agent
 from aletheia.agents.analyst import AnalystAgent
@@ -59,6 +60,7 @@ class OrchestratorAgent(Agent):
             retrieval_store=self.retrieval_store,
         )
         self.trace: list[AgentMessage] = []
+        self.last_run_details: dict[str, Any] = {}
 
     def _log_message(self, sender: str, receiver: str, msg_type: str, payload: str):
         """Log inter-agent communication for audit trail."""
@@ -75,6 +77,7 @@ class OrchestratorAgent(Agent):
     async def process_claim(self, text: str) -> Verdict:
         """Process a natural language claim through the full pipeline."""
         self.trace = []  # Reset trace for new claim
+        self.last_run_details = {}
         self.log(f"Processing claim: {text[:100]}...")
 
         # Step 1: Parse the claim
@@ -137,6 +140,34 @@ class OrchestratorAgent(Agent):
         if decomposition:
             analysis["methodology_vs_real"] = decomposition
 
+        source_outputs_summary = [
+            {
+                "source_id": output.source_id,
+                "break_count": len(output.breaks),
+                "doc_count": len(output.evidence_docs),
+                "error_count": len(output.errors),
+                "errors": list(output.errors),
+            }
+            for output in aggregated.source_outputs
+        ]
+        self.last_run_details = {
+            "claim_text": text,
+            "parsed_claim": claim.model_dump(mode="json"),
+            "routing_plan": {
+                "claim_type": aggregated.plan.claim_type.value,
+                "source_ids": list(aggregated.plan.source_ids),
+                "fallback_source_id": aggregated.plan.fallback_source_id,
+                "deep_research_source_ids": list(aggregated.plan.deep_research_source_ids),
+            },
+            "source_outputs": source_outputs_summary,
+            "break_count": len(breaks),
+            "analysis": analysis,
+            "evidence_docs": evidence_docs,
+            "aggregate_confidence": aggregated.aggregate_confidence,
+            "fallback_used": aggregated.fallback_used,
+            "deep_research_used": bool(analysis.get("deep_research_used", False)),
+        }
+
         self._log_message("Archivist", "ChiefAnalyst", "response", f"Found {len(breaks)} breaks")
         self._log_message("Analyst", "ChiefAnalyst", "response", str(analysis))
         self._log_message("Aggregator", "ChiefAnalyst", "response", f"Ranked {len(evidence_docs)} evidence snippets")
@@ -151,6 +182,12 @@ class OrchestratorAgent(Agent):
             evidence_docs=evidence_docs,
         )
         self._log_message("Editor", "ChiefAnalyst", "response", verdict.status.value)
+        self.last_run_details["verdict"] = {
+            "status": verdict.status.value,
+            "severity": verdict.severity.value,
+            "comparability": verdict.comparability.value,
+            "confidence": verdict.confidence,
+        }
 
         self.log(f"Verdict: {verdict.status.value}")
         return verdict
@@ -165,3 +202,7 @@ class OrchestratorAgent(Agent):
     def get_trace(self) -> list[dict]:
         """Get the audit trail of agent communications."""
         return [msg.model_dump() for msg in self.trace]
+
+    def get_last_run_details(self) -> dict[str, Any]:
+        """Get structured details from the most recent process_claim run."""
+        return dict(self.last_run_details)

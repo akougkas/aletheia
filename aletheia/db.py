@@ -141,6 +141,15 @@ def diagnose_connection_failure(exc: BaseException) -> dict[str, Any]:
                 "Ensure docker compose stack is running and ALETHEIA_DB_PORT matches exposed port.",
             ]
         )
+    elif "connection is bad" in lower:
+        category = "connection_unusable"
+        hints.extend(
+            [
+                "Database socket accepted but connection is unusable.",
+                "Verify ALETHEIA_DB_HOST/ALETHEIA_DB_PORT target the correct PostgreSQL instance.",
+                "If Docker is running on a non-default host port, set ALETHEIA_DB_PORT accordingly (for example 5433).",
+            ]
+        )
     elif "could not translate host name" in lower:
         category = "dns_error"
         hints.extend(
@@ -198,36 +207,36 @@ async def get_connection() -> AsyncGenerator[psycopg.AsyncConnection, None]:
 
 async def test_connection() -> dict[str, Any]:
     """Test database connection and return status + diagnostics."""
+    return _test_connection_sync()
+
+
+def _test_connection_sync() -> dict[str, Any]:
+    """Synchronous DB diagnostic probe used by CLI/onboarding health checks."""
     try:
-        async with get_connection() as conn:
-            pg_version = await (await conn.execute("SELECT version()")).fetchone()
+        with psycopg.connect(get_db_url(), row_factory=dict_row) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT version()")
+                pg_version = cur.fetchone()
 
-            ext_check = await (
-                await conn.execute(
-                    "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector')"
-                )
-            ).fetchone()
+                cur.execute("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector')")
+                ext_check = cur.fetchone()
 
-            pgai_check = await (
-                await conn.execute(
-                    "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'ai')"
-                )
-            ).fetchone()
+                cur.execute("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'ai')")
+                pgai_check = cur.fetchone()
 
-            tables = await (
-                await conn.execute(
+                cur.execute(
                     "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
                 )
-            ).fetchall()
+                tables = cur.fetchall()
 
-            return {
-                "ok": True,
-                "db_url_redacted": get_db_url(redacted=True),
-                "pg_version": pg_version["version"] if pg_version else None,
-                "pgvector_enabled": ext_check["exists"] if ext_check else False,
-                "pgai_installed": pgai_check["exists"] if pgai_check else False,
-                "tables": [t["tablename"] for t in tables],
-            }
+        return {
+            "ok": True,
+            "db_url_redacted": get_db_url(redacted=True),
+            "pg_version": pg_version["version"] if pg_version else None,
+            "pgvector_enabled": ext_check["exists"] if ext_check else False,
+            "pgai_installed": pgai_check["exists"] if pgai_check else False,
+            "tables": [t["tablename"] for t in tables],
+        }
     except Exception as exc:  # noqa: BLE001
         return {
             "ok": False,

@@ -3,6 +3,28 @@ import pytest
 from aletheia.web_search import WebSearchClient, WebSearchResult
 
 
+@pytest.fixture(autouse=True)
+def _clear_web_search_env(monkeypatch):
+    keys = [
+        "ALETHEIA_WEB_SEARCH_PROVIDER",
+        "ALETHEIA_WEB_SEARCH_CHAIN",
+        "ALETHEIA_WEB_FETCH_MAX_CHARS",
+        "ALETHEIA_WEB_FETCH_DOCS",
+        "ALETHEIA_ENABLE_CRAWL4AI_FALLBACK",
+        "ALETHEIA_WEB_DEFAULT_RATE_LIMIT_PER_MIN",
+        "ALETHEIA_WEB_RATE_LIMIT_PER_MIN",
+        "ALETHEIA_WEB_CIRCUIT_FAILURE_THRESHOLD",
+        "ALETHEIA_WEB_CIRCUIT_COOLDOWN_SECONDS",
+        "ALETHEIA_WEB_PROVIDER_BUDGET_PER_RUN",
+        "SERPAPI_API_KEY",
+        "GOOGLE_CSE_API_KEY",
+        "GOOGLE_CSE_CX",
+        "BRAVE_SEARCH_API_KEY",
+    ]
+    for key in keys:
+        monkeypatch.delenv(key, raising=False)
+
+
 class _Response:
     def __init__(self, payload):
         self._payload = payload
