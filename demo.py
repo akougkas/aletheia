@@ -254,13 +254,21 @@ def _print_case_report(
         if not isinstance(row, dict):
             continue
         errors = row.get("errors") if isinstance(row.get("errors"), list) else []
+        row_analysis = row.get("analysis") if isinstance(row.get("analysis"), dict) else {}
+        mode_notes = []
+        if row_analysis.get("break_search_mode"):
+            mode_notes.append(f"break={row_analysis.get('break_search_mode')}")
+        if row_analysis.get("doc_search_mode"):
+            mode_notes.append(f"docs={row_analysis.get('doc_search_mode')}")
         source_rows.append(
             [
                 row.get("source_id", "unknown"),
                 row.get("doc_count", 0),
                 row.get("break_count", 0),
                 row.get("error_count", 0),
-                ", ".join(str(e) for e in errors[:2]),
+                " | ".join(
+                    part for part in [", ".join(str(e) for e in errors[:2]), ", ".join(mode_notes)] if part
+                ),
             ]
         )
     ui.table(
@@ -275,6 +283,10 @@ def _print_case_report(
         ("aggregate_evidence_confidence", f"{aggregate_conf:.3f}"),
         ("provider_budget_skips", budget_skips),
     ]
+    claim_value_check = _analysis_signal(run, "claim_value_check")
+    if isinstance(claim_value_check, dict):
+        signal_rows.append(("claim_value_within_tolerance", claim_value_check.get("within_tolerance")))
+        signal_rows.append(("claim_value_delta", claim_value_check.get("delta")))
     summary = _analysis_signal(run, "provider_budget_summary", {})
     if isinstance(summary, dict) and summary:
         source_summary = summary.get("sources", {})

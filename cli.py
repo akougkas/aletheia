@@ -44,6 +44,8 @@ def _capability_rows() -> list[tuple[str, bool, str]]:
     openai_ready = bool(
         os.environ.get("OPENAI_API_KEY") or os.environ.get("ALETHEIA_OPENAI_API_KEY")
     )
+    semantic_ready = bool(embed_endpoint)
+    semantic_note = "run onboarding/db-doctor to verify embedding views + counts"
 
     return [
         ("runtime_profile", True, runtime_profile),
@@ -62,6 +64,7 @@ def _capability_rows() -> list[tuple[str, bool, str]]:
         ("web_search_google_cse", google_ready, "optional API key pair"),
         ("web_search_brave", brave_ready, "optional API key"),
         ("scholar_serpapi", serp_ready, "optional API key"),
+        ("semantic_vector_search", semantic_ready, semantic_note),
         (
             "crawl4ai_fallback",
             crawl4ai_enabled and crawl4ai_installed,
@@ -168,13 +171,26 @@ def _render_run_details(ui: TerminalUI, run: dict[str, Any]) -> None:
         for output in source_outputs:
             if not isinstance(output, dict):
                 continue
+            analysis = output.get("analysis") if isinstance(output.get("analysis"), dict) else {}
+            mode_bits = []
+            if analysis.get("break_search_mode"):
+                mode_bits.append(f"break={analysis.get('break_search_mode')}")
+            if analysis.get("doc_search_mode"):
+                mode_bits.append(f"docs={analysis.get('doc_search_mode')}")
             rows.append(
                 [
                     output.get("source_id"),
                     output.get("doc_count", 0),
                     output.get("break_count", 0),
                     output.get("error_count", 0),
-                    ", ".join(str(err) for err in (output.get("errors") or [])[:1]),
+                    " | ".join(
+                        bit
+                        for bit in [
+                            ", ".join(str(err) for err in (output.get("errors") or [])[:1]),
+                            ", ".join(mode_bits),
+                        ]
+                        if bit
+                    ),
                 ]
             )
         if rows:
@@ -185,6 +201,12 @@ def _render_run_details(ui: TerminalUI, run: dict[str, Any]) -> None:
             )
 
     analysis = run.get("analysis") if isinstance(run.get("analysis"), dict) else {}
+    claim_value_check = analysis.get("claim_value_check") if isinstance(
+        analysis.get("claim_value_check"), dict
+    ) else {}
+    structural_break = analysis.get("structural_break_detected") if isinstance(
+        analysis.get("structural_break_detected"), dict
+    ) else {}
     ui.kv_table(
         "Runtime Signals",
         [
@@ -200,9 +222,66 @@ def _render_run_details(ui: TerminalUI, run: dict[str, Any]) -> None:
                     run.get("aggregate_confidence", 0.0),
                 ),
             ),
+            ("claim_value_within_tolerance", claim_value_check.get("within_tolerance")),
+            ("claim_value_delta", claim_value_check.get("delta")),
+            ("structural_break_detected", structural_break.get("detected")),
             ("provider_budget_skips", analysis.get("provider_budget_skips")),
         ],
     )
+
+
+def _render_evidence_trail(ui: TerminalUI, run: dict[str, Any]) -> None:
+    docs = run.get("evidence_docs")
+    if not isinstance(docs, list) or not docs:
+        ui.warning("No evidence trail captured yet.")
+        return
+    rows = []
+    for idx, row in enumerate(docs[:20], start=1):
+        if not isinstance(row, dict):
+            continue
+        raw_conf = row.get("confidence_score", 0.0)
+        try:
+            conf_value = float(raw_conf)
+        except (TypeError, ValueError):
+            conf_value = 0.0
+        rows.append(
+            [
+                idx,
+                row.get("source_id", "unknown"),
+                f"{conf_value:.3f}",
+                row.get("title", "Untitled"),
+                row.get("url", ""),
+            ]
+        )
+    ui.table("Evidence Trail", ["#", "Source", "Confidence", "Title", "URL"], rows)
+
+
+def _render_evidence_doc(ui: TerminalUI, run: dict[str, Any], index: int) -> None:
+    docs = run.get("evidence_docs")
+    if not isinstance(docs, list) or not docs:
+        ui.warning("No evidence docs available.")
+        return
+    if index < 1 or index > len(docs):
+        ui.warning(f"Evidence index out of range. Choose 1..{len(docs)}.")
+        return
+    doc = docs[index - 1]
+    if not isinstance(doc, dict):
+        ui.warning("Selected evidence entry is not structured.")
+        return
+    ui.kv_table(
+        f"Evidence #{index}",
+        [
+            ("source_id", doc.get("source_id")),
+            ("title", doc.get("title")),
+            ("url", doc.get("url")),
+            ("relevance_score", doc.get("relevance_score")),
+            ("confidence_score", doc.get("confidence_score")),
+        ],
+    )
+    content = str(doc.get("content") or "").strip()
+    if content:
+        preview = content[:1200] + ("..." if len(content) > 1200 else "")
+        ui.thinking_block(preview, collapsed_label="Evidence Content")
 
 
 def _render_trace(ui: TerminalUI, trace: list[dict[str, Any]]) -> None:
@@ -574,9 +653,77 @@ async def interactive_mode(ui: TerminalUI):
     """Run interactive CLI session."""
     ui.banner(
         "ALETHEIA CLI",
-        "Type a policy claim to analyze.\nBuilt-in commands: help, trace, details, quit",
+        (
+            "Type a policy claim to analyze.\n"
+            "Built-in commands: help, trace, details, trail, !deep, !rerun, quit"
+        ),
     )
     orchestrator = OrchestratorAgent()
+    last_claim: str | None = None
+    persistent_deep = False
+
+    def _runtime_overrides(*, force_deep: bool) -> dict[str, str] | None:
+        if not force_deep:
+            return None
+        return {"ALETHEIA_ENABLE_DEEP_RESEARCH": "1"}
+
+    def _progress(event: dict[str, Any]) -> None:
+        kind = event.get("event")
+        if kind == "parser_started":
+            ui.info("Pipeline: parsing claim...")
+            return
+        if kind == "routing_selected":
+            sources = event.get("source_ids") or []
+            ui.info(f"Pipeline: routed to sources {sources}")
+            return
+        if kind == "source_started":
+            ui.info(f"Pipeline: running source `{event.get('source_id')}`...")
+            return
+        if kind == "source_completed":
+            ui.info(
+                (
+                    f"Pipeline: `{event.get('source_id')}` done "
+                    f"(docs={event.get('doc_count', 0)}, breaks={event.get('break_count', 0)}, "
+                    f"errors={event.get('error_count', 0)})"
+                )
+            )
+            return
+        if kind == "editor_started":
+            ui.info("Pipeline: synthesizing verdict...")
+            return
+        if kind == "collection_completed":
+            ui.info(
+                (
+                    "Pipeline: evidence collection complete "
+                    f"(docs={event.get('evidence_count', 0)}, breaks={event.get('break_count', 0)}, "
+                    f"confidence={event.get('aggregate_confidence', 0.0)})"
+                )
+            )
+
+    async def _run_claim_text(text: str, *, force_deep: bool) -> None:
+        nonlocal last_claim
+        mode_note = "deep-on" if force_deep else "deep-auto"
+        ui.info(f"Analyzing claim ({mode_note})...")
+        verdict = await orchestrator.process_claim(
+            text,
+            runtime_overrides=_runtime_overrides(force_deep=force_deep),
+            progress_callback=_progress,
+        )
+        run = orchestrator.get_last_run_details()
+        _render_verdict(ui, verdict)
+        _render_run_details(ui, run)
+        thinking_blocks = run.get("thinking_blocks")
+        if isinstance(thinking_blocks, list):
+            for block in thinking_blocks:
+                if not isinstance(block, dict):
+                    continue
+                content = str(block.get("text") or "").strip()
+                if not content:
+                    continue
+                agent = str(block.get("agent") or "LLM")
+                ui.thinking_block(content, collapsed_label=f"{agent} Reasoning")
+        last_claim = text
+
     try:
         while True:
             try:
@@ -595,6 +742,12 @@ async def interactive_mode(ui: TerminalUI):
                         "help: show commands",
                         "trace: show latest inter-agent trace",
                         "details: show latest routing/source runtime details",
+                        "trail: list current evidence trail",
+                        "trail <n>: inspect one evidence item",
+                        "!deep: rerun last claim with deep research forced once",
+                        "!deep on|off: toggle persistent deep mode for future claims",
+                        "!rerun: rerun last claim with current mode",
+                        "!mode: show current interactive mode",
                         "quit: exit session",
                     ],
                 )
@@ -605,11 +758,53 @@ async def interactive_mode(ui: TerminalUI):
             if claim.lower() == "details":
                 _render_run_details(ui, orchestrator.get_last_run_details())
                 continue
+            if claim.lower() == "!mode":
+                ui.kv_table(
+                    "Interactive Mode",
+                    [
+                        ("persistent_deep", persistent_deep),
+                        ("last_claim_available", bool(last_claim)),
+                    ],
+                )
+                continue
+            if claim.lower().startswith("trail"):
+                parts = claim.split()
+                if len(parts) == 1:
+                    _render_evidence_trail(ui, orchestrator.get_last_run_details())
+                else:
+                    try:
+                        idx = int(parts[1])
+                    except ValueError:
+                        ui.warning("Usage: trail <number>")
+                        continue
+                    _render_evidence_doc(ui, orchestrator.get_last_run_details(), idx)
+                continue
+            if claim.lower() == "!rerun":
+                if not last_claim:
+                    ui.warning("No previous claim to rerun.")
+                    continue
+                await _run_claim_text(last_claim, force_deep=persistent_deep)
+                continue
+            if claim.lower().startswith("!deep"):
+                parts = claim.split()
+                if len(parts) == 1:
+                    if not last_claim:
+                        ui.warning("No previous claim to rerun with deep mode.")
+                        continue
+                    await _run_claim_text(last_claim, force_deep=True)
+                    continue
+                mode = parts[1].lower()
+                if mode in {"on", "true", "1"}:
+                    persistent_deep = True
+                    ui.info("Persistent deep mode enabled.")
+                elif mode in {"off", "false", "0"}:
+                    persistent_deep = False
+                    ui.info("Persistent deep mode disabled.")
+                else:
+                    ui.warning("Usage: !deep [on|off]")
+                continue
 
-            ui.info("Analyzing claim...")
-            verdict = await orchestrator.process_claim(claim)
-            _render_verdict(ui, verdict)
-            _render_run_details(ui, orchestrator.get_last_run_details())
+            await _run_claim_text(claim, force_deep=persistent_deep)
     finally:
         await orchestrator.close()
         ui.info("Goodbye.")
@@ -627,7 +822,16 @@ async def single_claim(
     try:
         verdict = await orchestrator.process_claim(claim)
         _render_verdict(ui, verdict)
-        _render_run_details(ui, orchestrator.get_last_run_details())
+        run = orchestrator.get_last_run_details()
+        _render_run_details(ui, run)
+        thinking_blocks = run.get("thinking_blocks")
+        if isinstance(thinking_blocks, list):
+            for block in thinking_blocks:
+                if not isinstance(block, dict):
+                    continue
+                text = str(block.get("text") or "").strip()
+                if text:
+                    ui.thinking_block(text, collapsed_label=f"{block.get('agent', 'LLM')} Reasoning")
         if show_trace:
             _render_trace(ui, orchestrator.get_trace())
         if show_json:
@@ -711,6 +915,11 @@ async def show_db_doctor(
                 ("db_url", result.get("db_url_redacted")),
                 ("pgvector", result.get("pgvector_enabled")),
                 ("pgai", result.get("pgai_installed")),
+                ("semantic_search_ready", result.get("semantic_search_ready")),
+                ("methodology_changes", (result.get("counts") or {}).get("methodology_changes", 0)),
+                ("document_chunks", (result.get("counts") or {}).get("document_chunks", 0)),
+                ("methodology_embeddings", (result.get("counts") or {}).get("methodology_embeddings", 0)),
+                ("document_embeddings", (result.get("counts") or {}).get("document_embeddings", 0)),
                 ("tables", len(result.get("tables") or [])),
             ],
         )
@@ -746,6 +955,7 @@ async def show_onboarding(
     db_ok = bool(db_result.get("ok"))
     chat_ok = bool(llm_result.get("chat_ok"))
     embed_ok = bool(llm_result.get("embeddings_ok"))
+    semantic_ok = bool(db_result.get("semantic_search_ready")) if db_ok else False
     chat_diag = llm_result.get("chat") if isinstance(llm_result.get("chat"), dict) else {}
     embed_diag = (
         llm_result.get("embeddings") if isinstance(llm_result.get("embeddings"), dict) else {}
@@ -754,7 +964,7 @@ async def show_onboarding(
     ui.banner(
         "ALETHEIA Onboarding",
         (
-            "Local-first system check for stable Phase 2 foundations.\n"
+            "Local-first system check for stable Phase 3 foundations.\n"
             f"TUI mode: {ui.state.reason}"
         ),
     )
@@ -779,23 +989,64 @@ async def show_onboarding(
                 "ready" if embed_ok else "not ready",
                 embed_diag.get("endpoint", "n/a"),
             ],
+            [
+                "semantic_search",
+                "ready" if semantic_ok else "not ready",
+                (
+                    "document_chunks_embedding + methodology_changes_embedding available"
+                    if semantic_ok
+                    else "run vectorizer/materialization"
+                ),
+            ],
         ],
     )
 
-    chat_errors = [str(err) for err in (chat_diag.get("errors") or [])[:6]]
-    chat_hints = [str(hint) for hint in (chat_diag.get("hints") or [])[:6]]
+    counts = db_result.get("counts") if isinstance(db_result.get("counts"), dict) else {}
+    if db_ok and counts:
+        ui.kv_table(
+            "Knowledge Base Coverage",
+            [
+                ("methodology_changes", counts.get("methodology_changes", 0)),
+                ("document_chunks", counts.get("document_chunks", 0)),
+                ("methodology_embeddings", counts.get("methodology_embeddings", 0)),
+                ("document_embeddings", counts.get("document_embeddings", 0)),
+            ],
+        )
+
+    chat_errors = [
+        str(err).strip()
+        for err in (chat_diag.get("errors") or [])[:6]
+        if str(err).strip()
+    ]
+    chat_hints = [
+        str(hint).strip()
+        for hint in (chat_diag.get("hints") or [])[:6]
+        if str(hint).strip()
+    ]
     if chat_errors or chat_hints:
         ui.bullet_list(
             "LLM Chat Diagnostics",
             [*chat_errors, *chat_hints],
         )
 
-    embed_errors = [str(err) for err in (embed_diag.get("errors") or [])[:6]]
-    embed_hints = [str(hint) for hint in (embed_diag.get("hints") or [])[:6]]
+    embed_errors = [
+        str(err).strip()
+        for err in (embed_diag.get("errors") or [])[:6]
+        if str(err).strip()
+    ]
+    embed_hints = [
+        str(hint).strip()
+        for hint in (embed_diag.get("hints") or [])[:6]
+        if str(hint).strip()
+    ]
     if chat_ok and not embed_ok and bool(embed_diag.get("unsupported")):
         embed_hints.insert(
             0,
             "Chat is reachable but embeddings are unsupported on this endpoint; configure a different embedding endpoint/model.",
+        )
+    if not embed_ok and not embed_errors and not embed_hints:
+        embed_hints.append(
+            "Embedding probe failed without detailed server message; verify embedding model is loaded and /v1/embeddings is enabled."
         )
     if embed_errors or embed_hints:
         ui.bullet_list(
@@ -823,11 +1074,13 @@ async def show_onboarding(
     next_steps = [
         "Run `uv run python cli.py db-doctor` after DB credential/volume fixes.",
         "Run `uv run python cli.py onboarding` after starting your local model runtime and loading models.",
+        "Run `uv run python -m aletheia.ingest --seed-phase3 --fetch-urls --materialize-embeddings` to build the expanded Phase 3 KB.",
+        "Run `uv run python -m aletheia.vectorizer` to create/refresh semantic embedding views.",
         "Use `uv run python demo.py --quick --assert-phase2` for strict demo contract checks.",
     ]
     ui.bullet_list("Next steps", next_steps)
 
-    return 0 if (db_ok and chat_ok and embed_ok) else 2
+    return 0 if (db_ok and chat_ok and embed_ok and semantic_ok) else 2
 
 
 def _build_parser() -> argparse.ArgumentParser:
