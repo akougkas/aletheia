@@ -67,11 +67,13 @@ ALETHEIA catches these breaks because it reads methodology documentation, retrie
 
 ## Current Status
 
-We're in early development. The current version demonstrates:
+The current version demonstrates:
 - Claim parsing (natural language → structured query)
-- Knowledge graph search with pgai-managed vector embeddings (10 seeded methodology break cases)
-- Verdict synthesis (supported / partially supported / misleading)
-- Pluggable evidence routing (methodology KB + data APIs + web fallback + scholar deep-research)
+- Knowledge base with 408 document chunks + 50 methodology changes (pgai-managed 4096-dim vector embeddings)
+- 5 evidence sources: methodology KB, data APIs (BLS, FRED, Census ACS, Eurostat, ECB), document index, web fallback, scholar deep-research
+- Verdict synthesis with methodology-vs-real decomposition and Chow structural break detection
+- Color-coded interactive TUI with live pipeline spinner, confidence bars, and plain-English explanations
+- Eval harness: 39/40 (98%) on seed benchmark cases, avg 4.0s/claim, avg 81% confidence
 - Retrieval observability (run history, cache metrics, diagnostics)
 
 See [ROADMAP.md](ROADMAP.md) for the development plan.
@@ -241,27 +243,40 @@ Enhanced mode expectations (keys enabled):
 - Deep-research case can retrieve stronger `paper_scholar` results when `SERPAPI_API_KEY` is configured.
 - Web fallback coverage improves when Google/Brave keys are available.
 
-### 5) CLI UX surfaces (redesigned)
+### 5) CLI UX surfaces
+
+The CLI uses Rich panels, color-coded output, and live spinners by default.
+Verdicts show a compact panel with confidence bars, plain-English interpretations,
+and methodology decomposition — type `details` for the full breakdown.
 
 ```bash
-# Interactive session (with trace/details commands)
+# Interactive session — type a claim, get a color-coded verdict panel
 uv run python cli.py interactive
 
-# Backward-compatible single claim
-uv run python cli.py "EU unemployment fell in 2021."
+# Single claim analysis
+uv run python cli.py claim "The US poverty rate increased by 3% in 2020"
 
-# Explicit single-claim command with trace + JSON
-uv run python cli.py claim "EU unemployment fell in 2021." --trace --json
+# With full trace (routing, agent communication, AI reasoning)
+uv run python cli.py claim "EU unemployment fell sharply in 2021" --trace
+
+# System health check (status dots, guided next steps)
+uv run python cli.py onboarding
+
+# Database diagnostics
+uv run python cli.py db-doctor
 
 # Capability matrix
 uv run python cli.py capabilities
 
-# Local foundation onboarding check
-uv run python cli.py onboarding
-
-# Plain-text mode (disable rich tables/panels)
+# Plain-text mode (disable rich panels/colors — for logs, CI, or accessibility)
 uv run python cli.py --plain onboarding
 ```
+
+Interactive session commands after a verdict:
+- `details` — full breakdown: caveats, data sources, routing, AI reasoning
+- `trail` — list all evidence documents; `trail 3` to inspect one
+- `trace` — see how the AI agents communicated
+- `!deep` — re-analyze with deeper research; `!deep on` for persistent mode
 
 ### Integration Tests (Live DB)
 
