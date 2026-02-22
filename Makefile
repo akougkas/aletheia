@@ -8,13 +8,14 @@ COMPOSE_FILES ?= -f docker-compose.core.yml
 UV_CACHE_DIR ?= /tmp/uv-cache
 export UV_CACHE_DIR
 
-.PHONY: help sync sync-dev sync-test sync-crawler lock test test-targeted demo demo-assert onboarding doctor capabilities compose-up compose-down compose-logs
+.PHONY: help sync sync-dev sync-test sync-crawler lock test test-targeted demo demo-assert onboarding doctor capabilities ingest-methodology compose-up compose-down compose-logs
 
 help:
 	@echo "ALETHEIA commands"
 	@echo "  make sync               - install core runtime deps"
 	@echo "  make sync-dev           - install dev deps"
 	@echo "  make sync-crawler       - install crawler extras"
+	@echo "  make ingest-methodology - ingest MARINA docs + materialize embeddings (requires sync-crawler)"
 	@echo "  make test               - run full test suite"
 	@echo "  make test-targeted      - run fast targeted phase-2 tests"
 	@echo "  make onboarding         - run onboarding checks (PROFILE=<profile>)"
@@ -35,6 +36,9 @@ sync-test:
 
 sync-crawler:
 	$(UV) sync --extra crawler
+
+ingest-methodology:
+	$(UV) run python scripts/ingest_methodology.py --materialize
 
 lock:
 	$(UV) lock

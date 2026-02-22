@@ -9,6 +9,7 @@ from pathlib import Path
 import psycopg
 
 from aletheia.db import get_db_url, install_pgai
+from aletheia.ingest import seed_phase3_methodology_breaks
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +41,7 @@ def bootstrap_db(
     *,
     include_seed: bool = True,
     include_validate: bool = True,
+    include_phase3_breaks: bool = True,
 ) -> dict[str, str]:
     """Install pgai and optionally seed/validate."""
     install_pgai()
@@ -49,6 +51,10 @@ def bootstrap_db(
         if include_seed:
             _execute_sql(conn, ROOT / "sql" / "seed_cases.sql")
             actions.append("seed")
+
+            if include_phase3_breaks:
+                seed_phase3_methodology_breaks(dry_run=False, conn=conn)
+                actions.append("seed_phase3_breaks")
 
         if include_validate:
             if include_seed or _has_seeded_benchmark_cases(conn):
@@ -79,11 +85,17 @@ def main() -> None:
         action="store_true",
         help="Skip seed validation script.",
     )
+    parser.add_argument(
+        "--no-phase3-breaks",
+        action="store_true",
+        help="Skip expanded Phase 3 methodology-break seed rows.",
+    )
     args = parser.parse_args()
 
     result = bootstrap_db(
         include_seed=not args.no_seed,
         include_validate=not args.no_validate,
+        include_phase3_breaks=not args.no_phase3_breaks,
     )
     print(json.dumps(result, indent=2))
 

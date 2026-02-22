@@ -10,7 +10,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
@@ -349,6 +349,65 @@ class WebSearchClient:
         *,
         max_results: int,
     ) -> list[WebSearchResult]:
+        html_results = await self._search_duckduckgo_html(query, max_results=max_results)
+        if html_results:
+            return html_results
+        return await self._search_duckduckgo_instant_answer(query, max_results=max_results)
+
+    async def _search_duckduckgo_html(
+        self,
+        query: str,
+        *,
+        max_results: int,
+    ) -> list[WebSearchResult]:
+        response = await self._request_with_retry(
+            "GET",
+            "https://html.duckduckgo.com/html/",
+            params={"q": query, "kl": "us-en"},
+        )
+        if response is None:
+            return []
+
+        body = getattr(response, "text", "") or ""
+        if not body:
+            return []
+
+        parsed: list[WebSearchResult] = []
+        # DuckDuckGo HTML endpoint uses result__a anchors for organic links.
+        pattern = re.compile(
+            r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+            re.IGNORECASE | re.DOTALL,
+        )
+        snippet_pattern = re.compile(
+            r'<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>',
+            re.IGNORECASE | re.DOTALL,
+        )
+        snippets = [self._clean_text(self._extract_text(item)) for item in snippet_pattern.findall(body)]
+
+        for idx, match in enumerate(pattern.findall(body)):
+            raw_url, raw_title = match
+            url = self._decode_duckduckgo_redirect(raw_url)
+            if not url.startswith(("http://", "https://")):
+                continue
+            title = self._clean_text(self._extract_text(raw_title)) or self._title_from_url(url)
+            snippet = snippets[idx] if idx < len(snippets) else ""
+            parsed.append(
+                WebSearchResult(
+                    title=title,
+                    url=url,
+                    snippet=snippet,
+                    provider="duckduckgo",
+                )
+            )
+
+        return self._dedupe(parsed, max_results)
+
+    async def _search_duckduckgo_instant_answer(
+        self,
+        query: str,
+        *,
+        max_results: int,
+    ) -> list[WebSearchResult]:
         response = await self._request_with_retry(
             "GET",
             "https://api.duckduckgo.com/",
@@ -405,6 +464,19 @@ class WebSearchClient:
                     parsed.append(row)
 
         return self._dedupe(parsed, max_results)
+
+    def _decode_duckduckgo_redirect(self, url: str) -> str:
+        if not url:
+            return ""
+        url = html.unescape(url)
+        if url.startswith("//"):
+            return f"https:{url}"
+        if url.startswith("/l/?"):
+            query = parse_qs(urlparse(url).query)
+            encoded = query.get("uddg", [None])[0]
+            if encoded:
+                return unquote(encoded)
+        return url
 
     def _topic_to_result(self, topic: dict) -> WebSearchResult | None:
         if not isinstance(topic, dict):
