@@ -172,6 +172,36 @@ class AnalystAgent(Agent):
         points.sort(key=lambda p: p["date"])
         return points
 
+    async def _fetch_acs_poverty_rate(
+        self, start_year: int, end_year: int
+    ) -> list[dict[str, Any]]:
+        """Fetch US poverty rate (%) from ACS subject tables."""
+        api_key = os.environ.get("CENSUS_API_KEY")
+        points: list[dict[str, Any]] = []
+        for year in range(start_year, end_year + 1):
+            params = {"get": "NAME,S1701_C03_001E", "for": "us:1"}
+            if api_key:
+                params["key"] = api_key
+            response = await self.http.get(
+                f"{CENSUS_API_BASE}/{year}/acs/acs1/subject",
+                params=params,
+            )
+            if response.status_code != 200:
+                continue
+            payload = response.json()
+            if not isinstance(payload, list) or len(payload) < 2:
+                continue
+            row = payload[1]
+            try:
+                value = float(row[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if value <= 0:
+                continue
+            points.append({"date": str(year), "value": value})
+        points.sort(key=lambda p: p["date"])
+        return points
+
     async def _fetch_eurostat_series(
         self, dataset_code: str, params: dict[str, str]
     ) -> list[dict[str, Any]]:
@@ -294,10 +324,15 @@ class AnalystAgent(Agent):
                 }
 
             if dataset == "ACS":
-                points = await self._fetch_acs_median_income(start_year, end_year)
+                if hint == "poverty":
+                    points = await self._fetch_acs_poverty_rate(start_year, end_year)
+                    series_id = "ACS1_S1701_C03_001E_US"
+                else:
+                    points = await self._fetch_acs_median_income(start_year, end_year)
+                    series_id = "ACS1_B19013_001E_US"
                 return {
                     "source": "CENSUS",
-                    "series_id": "ACS1_B19013_001E_US",
+                    "series_id": series_id,
                     "dataset": dataset,
                     "indicator": claim.indicator,
                     "points": points,
@@ -306,10 +341,15 @@ class AnalystAgent(Agent):
                 }
 
             if not dataset and hint in {"poverty", "income"} and self._is_us_context(claim):
-                points = await self._fetch_acs_median_income(start_year, end_year)
+                if hint == "poverty":
+                    points = await self._fetch_acs_poverty_rate(start_year, end_year)
+                    series_id = "ACS1_S1701_C03_001E_US"
+                else:
+                    points = await self._fetch_acs_median_income(start_year, end_year)
+                    series_id = "ACS1_B19013_001E_US"
                 return {
                     "source": "CENSUS",
-                    "series_id": "ACS1_B19013_001E_US",
+                    "series_id": series_id,
                     "dataset": "ACS",
                     "indicator": claim.indicator,
                     "points": points,
@@ -344,7 +384,7 @@ class AnalystAgent(Agent):
                         {
                             "geo": "EU27_2020",
                             "sex": "T",
-                            "age": "Y15-74",
+                            "age": "TOTAL",
                             "unit": "PC_ACT",
                             "s_adj": "SA",
                         },
