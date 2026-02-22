@@ -665,8 +665,9 @@ class EvidenceAggregator:
         structure_signal = analysis.get("structural_break_detected")
         break_signal_adjust = 0.0
         if isinstance(structure_signal, dict) and structure_signal.get("detected"):
+            math_confidence = float(structure_signal.get("confidence", 0.5))
             if source_id in {"data_api", "methodology_kb"}:
-                break_signal_adjust += 0.04
+                break_signal_adjust += 0.15 * math_confidence
 
         score = (
             (0.55 * base)

@@ -418,51 +418,86 @@ class AnalystAgent(Agent):
         *,
         hint_year: int | None = None,
     ) -> dict[str, Any] | None:
-        """Run lightweight break diagnostics (mean-shift + CUSUM-style score)."""
+        """Run rigorous econometric break detection (Chow test on linear trend)."""
+        try:
+            import numpy as np
+            from scipy import stats
+        except ImportError:
+            self.log("Break detection requires math dependencies. Run: uv sync --extra math", level=30)
+            return None
+
         split_idx = self._choose_break_index(data, dates, hint_year=hint_year)
         if split_idx is None:
             return None
 
-        pre = data[:split_idx]
-        post = data[split_idx:]
-        if len(pre) < 3 or len(post) < 3:
+        y = np.array(data)
+        x = np.arange(len(y))
+
+        pre_y = y[:split_idx]
+        pre_x = x[:split_idx]
+        post_y = y[split_idx:]
+        post_x = x[split_idx:]
+
+        if len(pre_y) < 3 or len(post_y) < 3:
             return None
 
-        mean_pre = statistics.mean(pre)
-        mean_post = statistics.mean(post)
+        def _rss(x_vals, y_vals):
+            if len(x_vals) <= 2:
+                return 0.0
+            A = np.vstack([x_vals, np.ones(len(x_vals))]).T
+            coeffs, residuals, _, _ = np.linalg.lstsq(A, y_vals, rcond=None)
+            if residuals.size > 0:
+                return float(residuals[0])
+            preds = A.dot(coeffs)
+            return float(np.sum((y_vals - preds) ** 2))
+
+        rss_c = _rss(x, y)
+        rss_1 = _rss(pre_x, pre_y)
+        rss_2 = _rss(post_x, post_y)
+
+        # Chow test for linear trend (k=2: slope + intercept)
+        k = 2
+        N = len(y)
+        df1 = k
+        df2 = N - 2 * k
+
+        if df2 <= 0:
+            return None
+
+        rss_sum = rss_1 + rss_2
+        if rss_sum <= 1e-12:
+            if rss_c > 1e-12:
+                # Perfect break (no variance within segments but variance across)
+                chow_f = 9999.0
+                p_value = 0.0
+            else:
+                return None
+        else:
+            chow_f = ((rss_c - rss_sum) / df1) / (rss_sum / df2)
+            p_value = 1.0 - stats.f.cdf(chow_f, df1, df2)
+
+        mean_pre = float(np.mean(pre_y))
+        mean_post = float(np.mean(post_y))
         mean_shift = mean_post - mean_pre
 
-        var_pre = statistics.variance(pre) if len(pre) > 1 else 0.0
-        var_post = statistics.variance(post) if len(post) > 1 else 0.0
-        dof = max(1, (len(pre) - 1) + (len(post) - 1))
-        pooled_var = (((len(pre) - 1) * var_pre) + ((len(post) - 1) * var_post)) / dof
-        pooled_std = math.sqrt(max(pooled_var, 1e-9))
+        pooled_std = float(np.std(y))
         effect_size = mean_shift / pooled_std if pooled_std > 0 else 0.0
 
-        # CUSUM-style score around the split.
-        baseline = statistics.mean(data)
-        residuals = [value - baseline for value in data]
-        cumulative = []
-        running = 0.0
-        for residual in residuals:
-            running += residual
-            cumulative.append(running)
-        cusum_range = max(cumulative) - min(cumulative)
-        cusum_score = cusum_range / (pooled_std * math.sqrt(len(data)))
-
-        detected = abs(effect_size) >= 0.8 or cusum_score >= 1.2
-        confidence = min(0.95, 0.35 + (min(abs(effect_size), 2.5) / 5.0) + min(cusum_score, 2.0) / 5.0)
+        confidence = 0.95 if p_value < 0.01 else (0.8 if p_value < 0.05 else (0.5 if p_value < 0.1 else 0.3))
+        detected = bool(p_value < 0.05)
 
         return {
             "detected": detected,
             "split_index": split_idx,
             "split_date": dates[split_idx],
+            "test_type": "chow_test_linear_trend",
+            "f_statistic": float(round(chow_f, 4)),
+            "p_value": float(round(p_value, 4)),
             "mean_pre": round(mean_pre, 4),
             "mean_post": round(mean_post, 4),
             "mean_shift": round(mean_shift, 4),
             "effect_size": round(effect_size, 4),
-            "cusum_score": round(cusum_score, 4),
-            "confidence": round(confidence, 4),
+            "confidence": confidence,
         }
 
     def _value_for_year(self, points: list[dict[str, Any]], year: int) -> float | None:

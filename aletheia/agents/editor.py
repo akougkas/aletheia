@@ -178,10 +178,9 @@ class EditorAgent(Agent):
         normal_revision_only = bool(relevant_breaks) and all(
             self._is_normal_revision(change) for change in relevant_breaks
         )
+        break_detection = analysis.get("structural_break_detected")
         structure_signal = bool(
-            analysis.get("structural_break_detected", {}).get("detected")
-            if analysis.get("structural_break_detected")
-            else False
+            break_detection.get("detected") if isinstance(break_detection, dict) else False
         )
 
         decomposition = analysis.get("methodology_vs_real")
@@ -233,6 +232,21 @@ class EditorAgent(Agent):
             caveats = [caveat]
         else:
             caveats = []
+            
+        if isinstance(break_detection, dict) and break_detection.get("detected"):
+            test_type = break_detection.get("test_type", "Chow test").replace("_", " ")
+            p_val = break_detection.get("p_value", "N/A")
+            split_date = break_detection.get("split_date", "unknown date")
+            if relevant_breaks:
+                caveats.append(
+                    f"A {test_type} confirmed a significant structural break near {split_date} "
+                    f"(p={p_val}), supporting the documented methodology changes."
+                )
+            else:
+                caveats.append(
+                    f"A {test_type} detected a significant structural break near {split_date} "
+                    f"(p={p_val}), indicating a possible undocumented methodology change."
+                )
 
         if historical_breaks:
             caveats.append(
