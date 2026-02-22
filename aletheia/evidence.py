@@ -8,7 +8,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 
 from aletheia.retrieval_store import RetrievalStore
@@ -120,6 +120,10 @@ class MethodologyEvidenceSource:
             output.errors.append(str(docs_result))
         else:
             output.evidence_docs = docs_result
+        output.analysis = {
+            "break_search_mode": getattr(self.archivist, "last_break_search_mode", "unknown"),
+            "doc_search_mode": getattr(self.archivist, "last_doc_search_mode", "unknown"),
+        }
 
         return output
 
@@ -142,6 +146,9 @@ class DocumentIndexEvidenceSource:
         output = SourceOutput(source_id=self.source_id)
         try:
             output.evidence_docs = await self.archivist.find_evidence(claim, limit=self.limit)
+            output.analysis = {
+                "doc_search_mode": getattr(self.archivist, "last_doc_search_mode", "unknown"),
+            }
         except Exception as exc:  # noqa: BLE001
             output.errors.append(str(exc))
         return output
@@ -515,8 +522,8 @@ class EvidenceAggregator:
     ) -> AggregatedEvidence:
         breaks = self._dedupe_breaks(source_outputs)
         analysis = self._merge_analysis(source_outputs)
-        evidence_docs = self._score_and_rank_docs(claim, source_outputs)
-        aggregate_confidence = self._aggregate_confidence(evidence_docs)
+        evidence_docs = self._score_and_rank_docs(claim, source_outputs, analysis)
+        aggregate_confidence = self._aggregate_confidence(evidence_docs, analysis)
         fallback_used = any(
             plan.fallback_source_id and output.source_id == plan.fallback_source_id
             for output in source_outputs
@@ -551,6 +558,14 @@ class EvidenceAggregator:
                     chosen = dict(output.analysis)
                     break
 
+        source_analysis = {
+            output.source_id: output.analysis
+            for output in source_outputs
+            if output.analysis
+        }
+        if source_analysis:
+            chosen["source_analysis"] = source_analysis
+
         source_errors = {
             output.source_id: output.errors
             for output in source_outputs
@@ -564,6 +579,7 @@ class EvidenceAggregator:
         self,
         claim: PolicyClaim,
         source_outputs: list[SourceOutput],
+        analysis: dict[str, Any],
     ) -> list[dict[str, Any]]:
         scored: list[dict[str, Any]] = []
         for output in source_outputs:
@@ -571,7 +587,12 @@ class EvidenceAggregator:
                 doc = dict(raw_doc)
                 doc["source_id"] = output.source_id
                 relevance = self._score_relevance(claim, doc)
-                confidence = self._score_confidence(output.source_id, doc, relevance)
+                confidence = self._score_confidence(
+                    output.source_id,
+                    doc,
+                    relevance,
+                    analysis,
+                )
                 doc["relevance_score"] = round(relevance, 3)
                 doc["confidence_score"] = round(confidence, 3)
                 scored.append(doc)
@@ -621,6 +642,7 @@ class EvidenceAggregator:
         source_id: str,
         doc: dict[str, Any],
         relevance_score: float,
+        analysis: dict[str, Any],
     ) -> float:
         base = self.registry.base_confidence(source_id)
         trust_bonus = 0.1 if self.registry.is_trusted_url(source_id, doc.get("url")) else 0.0
@@ -631,16 +653,33 @@ class EvidenceAggregator:
             status = metadata.get("allowlist_status")
             if status in {"untrusted", "unknown"}:
                 allowlist_penalty = 0.12
+
+        data_consistency_adjust = 0.0
+        value_check = analysis.get("claim_value_check")
+        if source_id == "data_api" and isinstance(value_check, dict):
+            if value_check.get("within_tolerance") is True:
+                data_consistency_adjust += 0.08
+            elif value_check.get("within_tolerance") is False:
+                data_consistency_adjust -= 0.12
+
+        structure_signal = analysis.get("structural_break_detected")
+        break_signal_adjust = 0.0
+        if isinstance(structure_signal, dict) and structure_signal.get("detected"):
+            if source_id in {"data_api", "methodology_kb"}:
+                break_signal_adjust += 0.04
+
         score = (
             (0.55 * base)
             + (0.45 * relevance_score)
             + trust_bonus
             - fallback_penalty
             - allowlist_penalty
+            + data_consistency_adjust
+            + break_signal_adjust
         )
         return max(0.0, min(1.0, score))
 
-    def _aggregate_confidence(self, evidence_docs: list[dict[str, Any]]) -> float:
+    def _aggregate_confidence(self, evidence_docs: list[dict[str, Any]], analysis: dict[str, Any]) -> float:
         if not evidence_docs:
             return 0.0
         top_scores = [
@@ -650,7 +689,14 @@ class EvidenceAggregator:
         ]
         if not top_scores:
             return 0.0
-        return round(sum(top_scores) / len(top_scores), 3)
+        score = sum(top_scores) / len(top_scores)
+        value_check = analysis.get("claim_value_check")
+        if isinstance(value_check, dict):
+            if value_check.get("within_tolerance") is True:
+                score += 0.04
+            elif value_check.get("within_tolerance") is False:
+                score -= 0.08
+        return round(max(0.0, min(1.0, score)), 3)
 
 
 class EvidencePipeline:
@@ -683,13 +729,36 @@ class EvidencePipeline:
         self._run_source_skips: dict[str, int] = defaultdict(int)
 
     async def collect(self, claim: PolicyClaim) -> AggregatedEvidence:
+        return await self.collect_with_progress(claim, progress_callback=None)
+
+    async def collect_with_progress(
+        self,
+        claim: PolicyClaim,
+        *,
+        progress_callback: Callable[[dict[str, Any]], Any] | None,
+    ) -> AggregatedEvidence:
+        self._refresh_runtime_flags()
         self._reset_run_state()
         plan = self.router.route(claim)
+        await self._emit_progress(
+            progress_callback,
+            {
+                "event": "routing_selected",
+                "claim_type": plan.claim_type.value,
+                "source_ids": list(plan.source_ids),
+                "fallback_source_id": plan.fallback_source_id,
+            },
+        )
         run_id: int | None = None
         if self.retrieval_store:
             run_id = await self.retrieval_store.begin_run(claim, plan)
 
-        outputs = await self._collect_sources(plan.source_ids, claim, plan=plan)
+        outputs = await self._collect_sources(
+            plan.source_ids,
+            claim,
+            plan=plan,
+            progress_callback=progress_callback,
+        )
 
         if plan.fallback_source_id and not self._has_substantive_evidence(outputs):
             if plan.fallback_source_id in self.sources and all(
@@ -700,6 +769,7 @@ class EvidencePipeline:
                         [plan.fallback_source_id],
                         claim,
                         plan=plan,
+                        progress_callback=progress_callback,
                     )
                 )
 
@@ -710,6 +780,7 @@ class EvidencePipeline:
                 plan.deep_research_source_ids,
                 claim,
                 plan=plan,
+                progress_callback=progress_callback,
             )
             if deep_outputs:
                 outputs.extend(deep_outputs)
@@ -747,6 +818,15 @@ class EvidencePipeline:
                     "provider_budget_summary": aggregated.analysis.get("provider_budget_summary"),
                 },
             )
+        await self._emit_progress(
+            progress_callback,
+            {
+                "event": "collection_completed",
+                "break_count": len(aggregated.breaks),
+                "evidence_count": len(aggregated.evidence_docs),
+                "aggregate_confidence": aggregated.aggregate_confidence,
+            },
+        )
         return aggregated
 
     async def _collect_sources(
@@ -755,6 +835,7 @@ class EvidencePipeline:
         claim: PolicyClaim,
         *,
         plan: RoutingPlan,
+        progress_callback: Callable[[dict[str, Any]], Any] | None,
     ) -> list[SourceOutput]:
         tasks = []
         task_source_ids: list[str] = []
@@ -768,6 +849,14 @@ class EvidencePipeline:
             current_calls = self._run_source_calls.get(source_id, 0)
             if budget is not None and budget >= 0 and current_calls >= budget:
                 self._run_source_skips[f"{source_id}:run_budget_exceeded"] += 1
+                await self._emit_progress(
+                    progress_callback,
+                    {
+                        "event": "source_skipped",
+                        "source_id": source_id,
+                        "reason": "run_budget_exceeded",
+                    },
+                )
                 outputs.append(
                     SourceOutput(
                         source_id=source_id,
@@ -777,6 +866,10 @@ class EvidencePipeline:
                 continue
 
             self._run_source_calls[source_id] = current_calls + 1
+            await self._emit_progress(
+                progress_callback,
+                {"event": "source_started", "source_id": source_id},
+            )
             try:
                 task = source.collect(claim, plan=plan)  # type: ignore[call-arg]
             except TypeError:
@@ -790,9 +883,30 @@ class EvidencePipeline:
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for source_id, result in zip(task_source_ids, results, strict=True):
             if isinstance(result, Exception):
-                outputs.append(SourceOutput(source_id=source_id, errors=[str(result)]))
+                payload = SourceOutput(source_id=source_id, errors=[str(result)])
+                outputs.append(payload)
+                await self._emit_progress(
+                    progress_callback,
+                    {
+                        "event": "source_completed",
+                        "source_id": source_id,
+                        "break_count": 0,
+                        "doc_count": 0,
+                        "error_count": 1,
+                    },
+                )
             else:
                 outputs.append(result)
+                await self._emit_progress(
+                    progress_callback,
+                    {
+                        "event": "source_completed",
+                        "source_id": source_id,
+                        "break_count": len(result.breaks),
+                        "doc_count": len(result.evidence_docs),
+                        "error_count": len(result.errors),
+                    },
+                )
         return outputs
 
     def _has_substantive_evidence(self, outputs: list[SourceOutput]) -> bool:
@@ -858,6 +972,18 @@ class EvidencePipeline:
                 except Exception:
                     continue
 
+    def _refresh_runtime_flags(self) -> None:
+        self.deep_research_enabled = os.environ.get("ALETHEIA_ENABLE_DEEP_RESEARCH", "0") == "1"
+        self.deep_research_threshold = float(
+            os.environ.get("ALETHEIA_DEEP_RESEARCH_CONF_THRESHOLD", "0.62")
+        )
+        self.source_budget_per_run = self._parse_budget_map(
+            os.environ.get(
+                "ALETHEIA_SOURCE_BUDGET_PER_RUN",
+                "methodology_kb:1,data_api:1,document_index:1,web_fallback:1,paper_scholar:1",
+            )
+        )
+
     def _collect_provider_budget_report(self) -> tuple[dict[str, dict[str, Any]], int]:
         summary: dict[str, dict[str, Any]] = {}
         seen_clients: set[int] = set()
@@ -882,3 +1008,17 @@ class EvidencePipeline:
                 if run_key is not None:
                     seen_clients.add(run_key)
         return summary, total_skips
+
+    async def _emit_progress(
+        self,
+        callback: Callable[[dict[str, Any]], Any] | None,
+        payload: dict[str, Any],
+    ) -> None:
+        if callback is None:
+            return
+        try:
+            maybe = callback(payload)
+            if asyncio.iscoroutine(maybe):
+                await maybe
+        except Exception:
+            return
