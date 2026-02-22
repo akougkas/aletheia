@@ -1149,6 +1149,37 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("capabilities", help="Show capability matrix.", parents=[runtime_parent])
     sub.add_parser("onboarding", help="Run local-first setup checks.", parents=[runtime_parent])
+
+    # Model management
+    models_parser = sub.add_parser(
+        "models",
+        help="List and manage models across endpoints.",
+        parents=[runtime_parent],
+    )
+    models_sub = models_parser.add_subparsers(dest="models_action")
+    models_sub.add_parser("list", help="List all models (default).")
+    models_pull = models_sub.add_parser("pull", help="Pull a model (Ollama only).")
+    models_pull.add_argument("model_name", help="Model name to pull.")
+    models_delete = models_sub.add_parser("delete", help="Delete a model.")
+    models_delete.add_argument("model_name", help="Model name to delete.")
+    models_info = models_sub.add_parser("info", help="Show model details.")
+    models_info.add_argument("model_name", help="Model name to inspect.")
+    models_load = models_sub.add_parser("load", help="Load a model into memory.")
+    models_load.add_argument("model_name", help="Model name to load.")
+    models_unload = models_sub.add_parser("unload", help="Unload a model from memory.")
+    models_unload.add_argument("model_name", help="Model name to unload.")
+
+    # Endpoint management
+    endpoints_parser = sub.add_parser(
+        "endpoints",
+        help="List endpoints and health status.",
+        parents=[runtime_parent],
+    )
+    endpoints_sub = endpoints_parser.add_subparsers(dest="endpoints_action")
+    endpoints_sub.add_parser("list", help="List configured endpoints (default).")
+    endpoints_probe = endpoints_sub.add_parser("probe", help="Probe a URL to detect provider type.")
+    endpoints_probe.add_argument("url", help="Endpoint URL to probe.")
+
     return parser
 
 
@@ -1163,6 +1194,8 @@ def _normalize_argv(argv: list[str]) -> list[str]:
         "db-doctor",
         "capabilities",
         "onboarding",
+        "models",
+        "endpoints",
         "-h",
         "--help",
     }
@@ -1172,6 +1205,266 @@ def _normalize_argv(argv: list[str]) -> list[str]:
         return argv
     # Backward compatibility: `cli.py "<claim text>"`
     return ["claim", *argv]
+
+
+def _humanize_size(size_bytes: int | None) -> str:
+    if size_bytes is None:
+        return "—"
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(size_bytes) < 1024:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024  # type: ignore[assignment]
+    return f"{size_bytes:.1f} PB"
+
+
+async def show_models(ui: TerminalUI, action: str | None, args: argparse.Namespace) -> int:
+    """Model management commands."""
+    from aletheia.providers import get_configured_endpoints, get_provider
+
+    endpoints = get_configured_endpoints()
+    if not endpoints:
+        # No YAML config — build endpoints from env vars
+        endpoints = _endpoints_from_env()
+
+    if action is None or action == "list":
+        rows: list[list[Any]] = []
+        for ep_name, ep in endpoints.items():
+            provider = get_provider(ep)
+            try:
+                models = await provider.list_models()
+                for m in models:
+                    rows.append([
+                        m.name,
+                        _humanize_size(m.size_bytes),
+                        m.quantization or "—",
+                        m.parameter_count or "—",
+                        "yes" if m.loaded else "—",
+                        ", ".join(m.capabilities),
+                        m.provider,
+                        ep_name,
+                    ])
+            except Exception as exc:
+                rows.append([f"(error: {exc})", "—", "—", "—", "—", "—", ep.provider_type, ep_name])
+            finally:
+                await provider.close()
+        if rows:
+            ui.table(
+                "Models",
+                ["Name", "Size", "Quant", "Params", "Loaded", "Caps", "Provider", "Endpoint"],
+                rows,
+            )
+        else:
+            ui.warning("No models found across configured endpoints.")
+        return 0
+
+    # Action-specific: find the right provider
+    model_name = getattr(args, "model_name", None)
+    if not model_name:
+        ui.error("Model name required.")
+        return 2
+
+    if action == "pull":
+        provider = _find_provider_for_action(endpoints, "model_pull")
+        if provider is None:
+            ui.error("No endpoint supports model pulling (Ollama required).")
+            return 2
+        try:
+            ui.info(f"Pulling {model_name}...")
+
+            def _progress(chunk: dict) -> None:
+                status = chunk.get("status", "")
+                total = chunk.get("total", 0)
+                completed = chunk.get("completed", 0)
+                if total:
+                    pct = completed / total * 100
+                    ui.info(f"  {status}: {pct:.0f}%")
+                elif status:
+                    ui.info(f"  {status}")
+
+            result = await provider.pull_model(model_name, progress_callback=_progress)
+            ui.success(f"Pull complete: {result.get('status', 'ok')}")
+            return 0
+        finally:
+            await provider.close()
+
+    if action == "delete":
+        provider = _find_provider_for_action(endpoints, "model_delete")
+        if provider is None:
+            ui.error("No endpoint supports model deletion.")
+            return 2
+        try:
+            result = await provider.delete_model(model_name)
+            ui.success(f"Deleted {model_name}")
+            return 0
+        finally:
+            await provider.close()
+
+    if action == "info":
+        provider = _find_provider_for_action(endpoints, "model_info")
+        if provider is None:
+            ui.error("No endpoint supports model info.")
+            return 2
+        try:
+            info = await provider.model_info(model_name)
+            ui.kv_table(
+                f"Model: {info.name}",
+                [
+                    ("size", _humanize_size(info.size_bytes)),
+                    ("quantization", info.quantization or "—"),
+                    ("family", info.family or "—"),
+                    ("parameter_count", info.parameter_count or "—"),
+                    ("capabilities", ", ".join(info.capabilities)),
+                    ("provider", info.provider),
+                    ("endpoint", info.endpoint_name),
+                ],
+            )
+            return 0
+        finally:
+            await provider.close()
+
+    if action == "load":
+        provider = _find_provider_for_action(endpoints, "model_load")
+        if provider is None:
+            ui.error("No endpoint supports model loading.")
+            return 2
+        try:
+            result = await provider.load_model(model_name)
+            if result.get("ok"):
+                ui.success(f"Loaded {model_name}")
+            else:
+                ui.error(f"Load failed: {result.get('error', 'unknown')}")
+            return 0
+        finally:
+            await provider.close()
+
+    if action == "unload":
+        provider = _find_provider_for_action(endpoints, "model_unload")
+        if provider is None:
+            ui.error("No endpoint supports model unloading.")
+            return 2
+        try:
+            result = await provider.unload_model(model_name)
+            if result.get("ok"):
+                ui.success(f"Unloaded {model_name}")
+            else:
+                ui.error(f"Unload failed: {result.get('error', 'unknown')}")
+            return 0
+        finally:
+            await provider.close()
+
+    ui.error(f"Unknown models action: {action}")
+    return 2
+
+
+async def show_endpoints(ui: TerminalUI, action: str | None, args: argparse.Namespace) -> int:
+    """Endpoint management commands."""
+    from aletheia.providers import get_configured_endpoints, get_provider, probe_endpoint
+
+    if action == "probe":
+        url = getattr(args, "url", None)
+        if not url:
+            ui.error("URL required.")
+            return 2
+        ui.info(f"Probing {url}...")
+        result = await probe_endpoint(url)
+        ui.kv_table(
+            "Probe Result",
+            [
+                ("url", result["url"]),
+                ("provider_type", result["provider_type"]),
+                ("healthy", result["health"].get("ok", False)),
+            ],
+        )
+        models = result.get("models", [])
+        if models:
+            rows = [
+                [m["name"], m.get("family") or "—", m.get("parameter_count") or "—", ", ".join(m.get("capabilities", []))]
+                for m in models
+            ]
+            ui.table("Available Models", ["Name", "Family", "Params", "Capabilities"], rows)
+        return 0
+
+    # Default: list endpoints with health
+    endpoints = get_configured_endpoints()
+    if not endpoints:
+        endpoints = _endpoints_from_env()
+
+    rows: list[list[Any]] = []
+    for ep_name, ep in endpoints.items():
+        provider = get_provider(ep)
+        try:
+            health = await provider.health_check()
+            rows.append([
+                ep_name,
+                ep.url,
+                ep.provider_type,
+                ", ".join(ep.roles),
+                "healthy" if health.get("ok") else "unreachable",
+                health.get("model_count", "—"),
+            ])
+        except Exception as exc:
+            rows.append([ep_name, ep.url, ep.provider_type, ", ".join(ep.roles), f"error: {exc}", "—"])
+        finally:
+            await provider.close()
+
+    if rows:
+        ui.table("Endpoints", ["Name", "URL", "Provider", "Roles", "Status", "Models"], rows)
+    else:
+        ui.warning("No endpoints configured. Create aletheia.yaml or set ALETHEIA_LLM_BASE_URL.")
+    return 0
+
+
+def _endpoints_from_env() -> dict:
+    """Build endpoint configs from env vars when no YAML config exists."""
+    from aletheia.providers.base import Endpoint
+
+    endpoints: dict[str, Endpoint] = {}
+    chat_url = os.environ.get("ALETHEIA_LLM_BASE_URL", "http://127.0.0.1:1234")
+    embed_url = os.environ.get("ALETHEIA_EMBED_BASE_URL", chat_url)
+
+    endpoints["chat"] = Endpoint(
+        name="chat",
+        url=chat_url,
+        provider_type="openai_compat",
+        roles=["chat"],
+        api_key=os.environ.get("ALETHEIA_LLM_API_KEY"),
+        default_chat_model=os.environ.get("ALETHEIA_LLM_MODEL"),
+    )
+    if embed_url != chat_url:
+        endpoints["embed"] = Endpoint(
+            name="embed",
+            url=embed_url,
+            provider_type="openai_compat",
+            roles=["embed"],
+            api_key=os.environ.get("ALETHEIA_EMBED_API_KEY"),
+            default_embed_model=os.environ.get("ALETHEIA_EMBED_MODEL"),
+        )
+    else:
+        endpoints["chat"].roles = ["chat", "embed"]
+        endpoints["chat"].default_embed_model = os.environ.get("ALETHEIA_EMBED_MODEL")
+
+    return endpoints
+
+
+def _find_provider_for_action(endpoints: dict, action: str):
+    """Find the first endpoint that supports the given capability."""
+    from aletheia.providers import Capability, get_provider
+
+    cap_map = {
+        "model_pull": Capability.MODEL_PULL,
+        "model_delete": Capability.MODEL_DELETE,
+        "model_info": Capability.MODEL_INFO,
+        "model_load": Capability.MODEL_LOAD,
+        "model_unload": Capability.MODEL_UNLOAD,
+    }
+    target_cap = cap_map.get(action)
+    if target_cap is None:
+        return None
+    for ep in endpoints.values():
+        provider = get_provider(ep)
+        if target_cap in provider.capabilities():
+            return provider
+    return None
 
 
 def main() -> int:
@@ -1216,6 +1509,10 @@ def main() -> int:
         return 0
     if command == "onboarding":
         return asyncio.run(show_onboarding(ui, resolved_profile=resolved_profile))
+    if command == "models":
+        return asyncio.run(show_models(ui, getattr(args, "models_action", None), args))
+    if command == "endpoints":
+        return asyncio.run(show_endpoints(ui, getattr(args, "endpoints_action", None), args))
 
     parser.print_help()
     return 2

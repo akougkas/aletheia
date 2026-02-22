@@ -14,6 +14,40 @@ DEFAULT_EMBED_MODEL = "text-embedding-ada-002"
 DEFAULT_EMBED_DIM = 4096
 
 
+def _resolve_embedding_config() -> tuple[str, int, str]:
+    """Resolve embedding model, dimensions, and base URL.
+
+    Checks for a loaded provider config first (via aletheia.yaml endpoints),
+    then falls back to env vars for backward compatibility.
+    """
+    # Try provider-based resolution
+    try:
+        from aletheia.providers import _active_embed_endpoint  # noqa: F401
+
+        ep = _active_embed_endpoint()
+        if ep is not None:
+            model = ep.default_embed_model or os.environ.get("ALETHEIA_EMBED_MODEL", DEFAULT_EMBED_MODEL)
+            try:
+                dimensions = int(os.environ.get("ALETHEIA_EMBED_DIM", str(DEFAULT_EMBED_DIM)))
+            except ValueError:
+                dimensions = DEFAULT_EMBED_DIM
+            base_url = ep.url.rstrip("/")
+            if not base_url.endswith("/v1"):
+                base_url = f"{base_url}/v1"
+            return model, dimensions, base_url
+    except (ImportError, AttributeError):
+        pass
+
+    # Fallback: env var resolution (backward compat)
+    model = os.environ.get("ALETHEIA_EMBED_MODEL", DEFAULT_EMBED_MODEL)
+    try:
+        dimensions = int(os.environ.get("ALETHEIA_EMBED_DIM", str(DEFAULT_EMBED_DIM)))
+    except ValueError:
+        dimensions = DEFAULT_EMBED_DIM
+    base_url = _resolve_embedding_base_url()
+    return model, dimensions, base_url
+
+
 def _resolve_embedding_base_url() -> str:
     """Resolve OpenAI-compatible embedding base URL for pgai."""
     raw = (
@@ -26,16 +60,6 @@ def _resolve_embedding_base_url() -> str:
     if base.endswith("/v1"):
         return base
     return f"{base}/v1"
-
-
-def _resolve_embedding_config() -> tuple[str, int, str]:
-    model = os.environ.get("ALETHEIA_EMBED_MODEL", DEFAULT_EMBED_MODEL)
-    try:
-        dimensions = int(os.environ.get("ALETHEIA_EMBED_DIM", str(DEFAULT_EMBED_DIM)))
-    except ValueError:
-        dimensions = DEFAULT_EMBED_DIM
-    base_url = _resolve_embedding_base_url()
-    return model, dimensions, base_url
 
 
 def create_vectorizers():
@@ -117,10 +141,14 @@ def materialize_embeddings_once(timeout_seconds: int = 600) -> dict[str, object]
         ["pgai", "vectorizer", "worker", "--once", "--db-url", db_url],
         [sys.executable, "-m", "pgai.vectorizer_worker", "--once", "--db-url", db_url],
     ]
-    # pgai requires OPENAI_API_KEY even for local Ollama endpoints.
+    # pgai vectorizer-worker requires OPENAI_API_KEY in its environment even
+    # when targeting local Ollama/LM Studio endpoints that need no key.
+    # Set a placeholder value so the worker doesn't refuse to start.
     env = {**os.environ}
     if not env.get("OPENAI_API_KEY"):
-        env["OPENAI_API_KEY"] = "ollama-local"
+        # Try to get a real key from provider config, fall back to placeholder.
+        api_key = _resolve_embed_api_key()
+        env["OPENAI_API_KEY"] = api_key or "local"
     attempts: list[dict[str, object]] = []
 
     for cmd in commands:
@@ -173,6 +201,19 @@ def materialize_embeddings_once(timeout_seconds: int = 600) -> dict[str, object]
             "Install pgai with vectorizer-worker extras."
         ),
     }
+
+
+def _resolve_embed_api_key() -> str | None:
+    """Get the embed endpoint's API key from provider config or env."""
+    try:
+        from aletheia.providers import _active_embed_endpoint
+
+        ep = _active_embed_endpoint()
+        if ep is not None and ep.api_key:
+            return ep.api_key
+    except (ImportError, AttributeError):
+        pass
+    return os.environ.get("ALETHEIA_EMBED_API_KEY") or os.environ.get("ALETHEIA_LLM_API_KEY")
 
 
 def vectorizer_status() -> dict[str, object]:

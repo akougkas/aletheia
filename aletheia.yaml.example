@@ -1,0 +1,37 @@
+# aletheia.yaml — AI provider configuration
+#
+# Copy to aletheia.yaml and edit for your setup.
+# Precedence: CLI flags > env vars > this file > profile defaults.
+
+profile: zbook-single
+
+endpoints:
+  zbook-lmstudio:
+    url: http://127.0.0.1:1234
+    provider: lmstudio
+    roles: [chat]
+  zbook-ollama:
+    url: http://127.0.0.1:11434
+    provider: ollama
+    roles: [embed]
+    default_embed_model: qwen3-embedding:8b
+  # Future homelab endpoints:
+  # dynamo-ollama:
+  #   url: http://192.168.86.143:11434
+  #   provider: ollama
+  #   roles: [chat, embed]
+
+chat:
+  endpoint: zbook-lmstudio
+  # model: override-model-name  # optional
+
+embed:
+  endpoint: zbook-ollama
+  model: qwen3-embedding:8b
+
+db:
+  host: localhost
+  port: 5433
+  name: aletheia
+  user: aletheia
+  password: aletheia

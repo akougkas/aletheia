@@ -1,13 +1,18 @@
 """LLM client for OpenAI-compatible endpoints."""
 
+from __future__ import annotations
+
 import json
 import os
 import re
 from dataclasses import dataclass
-from typing import AsyncGenerator, Optional
+from typing import TYPE_CHECKING, AsyncGenerator, Optional
 
 import httpx
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from aletheia.providers.base import AIProvider
 
 
 # ---------------------------------------------------------------------------
@@ -82,10 +87,26 @@ class LLMConfig(BaseModel):
 
 
 class LLMClient:
-    """Async client for llama.cpp server's OpenAI-compatible API."""
+    """Async client for OpenAI-compatible AI endpoints.
 
-    def __init__(self, config: Optional[LLMConfig] = None):
+    Supports two modes:
+    1. Provider-backed: pass ``chat_provider`` / ``embed_provider`` for full
+       provider abstraction.
+    2. Legacy config-backed: pass ``config`` (or None for env-based defaults)
+       to use direct httpx calls.  This is the backward-compatible path.
+    """
+
+    def __init__(
+        self,
+        config: Optional[LLMConfig] = None,
+        *,
+        chat_provider: Optional[AIProvider] = None,
+        embed_provider: Optional[AIProvider] = None,
+    ):
         self.config = config
+        self._chat_provider = chat_provider
+        self._embed_provider = embed_provider
+        # Legacy httpx clients (only created if no provider given)
         self._client: Optional[httpx.AsyncClient] = None
         self._embed_client: Optional[httpx.AsyncClient] = None
 
@@ -128,6 +149,10 @@ class LLMClient:
         if self._embed_client:
             await self._embed_client.aclose()
             self._embed_client = None
+        if self._chat_provider:
+            await self._chat_provider.close()
+        if self._embed_provider:
+            await self._embed_provider.close()
 
     async def complete(
         self,
@@ -158,15 +183,25 @@ class LLMClient:
         stop: Optional[list[str]] = None,
     ) -> CompletionResult:
         """Generate a completion with separated reasoning tokens."""
-        client = await self._get_client()
-        config = self._effective_config()
-
-        messages = []
+        messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        payload = {
+        if self._chat_provider:
+            data = await self._chat_provider.chat(
+                messages,
+                model=None,  # Use endpoint defaults
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stop=stop,
+            )
+            return _extract_completion_result(data)
+
+        # Legacy path: direct httpx
+        client = await self._get_client()
+        config = self._effective_config()
+        payload: dict = {
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -196,15 +231,34 @@ class LLMClient:
         ``"reasoning"``.  Callers that only care about final text can ignore
         the tag or use :meth:`stream_content`.
         """
-        client = await self._get_client()
-        config = self._effective_config()
-
-        messages = []
+        messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        payload = {
+        if self._chat_provider:
+            async for chunk in self._chat_provider.stream_chat(
+                messages,
+                model=None,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stop=stop,
+            ):
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                content_token = delta.get("content")
+                if content_token:
+                    yield ("content", content_token)
+                for key in _REASONING_KEYS:
+                    reasoning_token = delta.get(key)
+                    if reasoning_token:
+                        yield ("reasoning", reasoning_token)
+                        break
+            return
+
+        # Legacy path: direct httpx
+        client = await self._get_client()
+        config = self._effective_config()
+        payload: dict = {
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -258,9 +312,14 @@ class LLMClient:
 
     async def embed(self, text: str) -> list[float]:
         """Get embedding vector for text."""
+        if self._embed_provider:
+            vectors = await self._embed_provider.embed(text)
+            return vectors[0]
+
+        # Legacy path: direct httpx
         client = await self._get_embed_client()
         config = self._effective_config()
-        payload = {"input": text}
+        payload: dict = {"input": text}
         model = config.embed_model or config.model
         if model:
             payload["model"] = model
