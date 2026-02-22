@@ -182,6 +182,10 @@ class EditorAgent(Agent):
         structure_signal = bool(
             break_detection.get("detected") if isinstance(break_detection, dict) else False
         )
+        # Extract Chow test strength for verdict weighting.
+        math_confidence = 0.0
+        if isinstance(break_detection, dict) and break_detection.get("detected"):
+            math_confidence = float(break_detection.get("confidence", 0.0))
 
         decomposition = analysis.get("methodology_vs_real")
         methodology_share = (
@@ -200,8 +204,13 @@ class EditorAgent(Agent):
 
         if not breaks:
             if analysis.get("data_retrieved"):
-                status = VerdictStatus.SUPPORTED
-                comparability = ComparabilityLevel.COMPARABLE
+                # Math-aware: strong Chow signal with no KB breaks → possible undocumented break.
+                if structure_signal and math_confidence >= 0.8:
+                    status = VerdictStatus.PARTIALLY_SUPPORTED
+                    comparability = ComparabilityLevel.UNCERTAIN
+                else:
+                    status = VerdictStatus.SUPPORTED
+                    comparability = ComparabilityLevel.COMPARABLE
             else:
                 status = VerdictStatus.INSUFFICIENT_DATA
                 comparability = ComparabilityLevel.UNCERTAIN
@@ -344,6 +353,18 @@ Methodology changes:
                 0.0,
                 min(0.08, (float(aggregate_confidence) - 0.5) * 0.2),
             )
+        # Chow test confidence contribution: strong math signal boosts verdict confidence,
+        # conflicting signals (math break + no KB breaks, or no math break + KB major) penalize.
+        if structure_signal and math_confidence > 0:
+            if relevant_breaks:
+                # Math corroborates KB breaks — boost proportional to test strength.
+                confidence += min(0.12, math_confidence * 0.15)
+            else:
+                # Math detected break but no KB documentation — uncertain but informative.
+                confidence += min(0.05, math_confidence * 0.06)
+        elif not structure_signal and relevant_breaks and severity == SeverityLevel.MAJOR:
+            # KB says major break but math found nothing — conflicting, lower confidence.
+            confidence -= 0.06
         confidence = max(0.2, min(confidence, 0.95))
 
         scenarios = None

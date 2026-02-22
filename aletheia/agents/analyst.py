@@ -45,6 +45,9 @@ class AnalystAgent(Agent):
             "EU SILC": "EU-SILC",
             "EU-LFS ": "EU-LFS",
             "ESA 2010": "ESA2010",
+            "EURO AREA": "ECB",
+            "EUROZONE": "ECB",
+            "EA": "ECB",
         }
         return alias_map.get(value, value)
 
@@ -57,6 +60,12 @@ class AnalystAgent(Agent):
         if "gdp" in text:
             return "gdp"
         return "generic"
+
+    def _is_eu_context(self, claim: PolicyClaim) -> bool:
+        """Detect if the claim is about EU/Euro area data."""
+        text = f"{claim.geography or ''} {claim.original_text}".lower()
+        eu_markers = {"euro area", "eurozone", "eu ", "eu-", "european union", "eurostat"}
+        return any(m in text for m in eu_markers)
 
     async def _fetch_bls_series(
         self, series_id: str, start_year: int, end_year: int
@@ -242,6 +251,15 @@ class AnalystAgent(Agent):
         current_year = datetime.now(timezone.utc).year
         end_year = min(current_year, (extract_year(claim.period_end) or current_year))
 
+        # Infer EU dataset from geography when parser leaves dataset empty.
+        if not dataset and self._is_eu_context(claim):
+            if hint == "unemployment":
+                dataset = "EU-LFS"
+            elif hint == "inflation":
+                dataset = "HICP"
+            elif hint == "gdp":
+                dataset = "ECB"
+
         try:
             if dataset in {"CPS", "CPI", "BLS"} or (not dataset and hint in {"unemployment", "inflation"}):
                 series_id = "LNS14000000" if hint == "unemployment" else "CUUR0000SA0"
@@ -267,6 +285,15 @@ class AnalystAgent(Agent):
                     "data_available": len(points) > 0,
                     "note": "Census ACS API",
                 }
+
+            # Route generic "EU" dataset based on indicator hint.
+            if dataset == "EU":
+                if hint == "unemployment":
+                    dataset = "EU-LFS"
+                elif hint == "inflation":
+                    dataset = "HICP"
+                elif hint == "gdp":
+                    dataset = "ECB"
 
             if dataset in {"EU-LFS", "HICP"}:
                 if dataset == "EU-LFS":
@@ -343,16 +370,15 @@ class AnalystAgent(Agent):
                     series_path,
                     start_period=f"{start_year}-01-01",
                 )
-                if points:
-                    return {
-                        "source": "ECB",
-                        "series_id": series_path,
-                        "dataset": dataset,
-                        "indicator": claim.indicator,
-                        "points": points,
-                        "data_available": True,
-                        "note": "ECB SDMX API",
-                    }
+                return {
+                    "source": "ECB",
+                    "series_id": series_path,
+                    "dataset": dataset,
+                    "indicator": claim.indicator,
+                    "points": points,
+                    "data_available": len(points) > 0,
+                    "note": "ECB SDMX API",
+                }
 
             if dataset in {"FRED", "ESA2010"} or hint == "gdp":
                 fred_series = "GDP" if hint == "gdp" else "UNRATE"
