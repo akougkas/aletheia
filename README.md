@@ -247,7 +247,7 @@ ALETHEIA_RUN_INTEGRATION=1 uv run --extra dev pytest -m integration -q
 
 ### Optional: Live Web Search Engines
 
-For Phase 2 web fallback, ALETHEIA can query live providers directly:
+For web fallback evidence, ALETHEIA can query live providers directly:
 
 ```bash
 # Provider selection:

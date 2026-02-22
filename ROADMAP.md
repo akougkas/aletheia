@@ -1,14 +1,14 @@
 # ALETHEIA Roadmap
 
-> Last updated: 2026-02-21
+> Last updated: 2026-02-22
 
-## Demo Day Target (Upcoming Thursday: Feb 26, 2026)
+## Demo Day Target (Thursday Feb 26, 2026)
 
 **Goal**: Demonstrate end-to-end autonomous claim validation for Macro-Economic & Public Health Official Statistics.
 
 **Success criteria**:
-- [ ] User submits a claim → system autonomously validates → returns verdict with sources
-- [ ] System successfully fetches official time-series data and proves structural methodology breaks mathematically
+- [x] User submits a claim → system autonomously validates → returns verdict with sources
+- [x] System successfully fetches official time-series data and proves structural methodology breaks mathematically
 - [ ] System retrieves and explicitly cites the corresponding methodology PDFs
 - [ ] Clear narrative connecting rigorous econometric tests to LLM-driven claim validation
 
@@ -20,16 +20,16 @@
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| PostgreSQL + pgvector | ✅ Done | Running in Docker |
-| Database schema | ✅ Done | Agencies, datasets, indicators, methodology_changes, documents |
-| LLM client (llama.cpp) | ✅ Done | Connects to mini:8080 |
+| PostgreSQL + pgvector + pgai | ✅ Done | Docker Compose with vectorizer worker |
+| Database schema | ✅ Done | Agencies, datasets, indicators, methodology_changes, document_chunks |
+| LLM client | ✅ Done | OpenAI-compatible endpoints (LM Studio, Ollama) with provider abstraction |
 | Claim Parser agent | ✅ Done | Extracts structured claims from natural language |
-| Archivist agent | ✅ Done | Queries MARINA graph for methodology breaks |
-| Analyst agent | ✅ Done | Live connectors for BLS/FRED/Census/Eurostat/ECB |
-| Editor agent | ✅ Done | Synthesizes verdicts |
-| Orchestrator | ✅ Done | Coordinates agent pipeline |
-| CLI + Demo | ✅ Done | Interactive and presentation modes |
-| 10 test cases seeded | ✅ Done | Marina's methodology break cases |
+| Archivist agent | ✅ Done | Semantic vector search over methodology KB + document index |
+| Analyst agent | ✅ Done | Live connectors for BLS, FRED, Census ACS, Eurostat, ECB |
+| Editor agent | ✅ Done | Synthesizes verdicts with methodology-vs-real decomposition |
+| Orchestrator | ✅ Done | Coordinates full agent pipeline |
+| CLI | ✅ Done | `uv run aletheia` — interactive, single-claim, onboarding, diagnostics |
+| 10 test cases seeded | ✅ Done | Marina's methodology break cases + 40 expanded adversarial cases |
 
 ---
 
@@ -37,30 +37,39 @@
 
 **Status**: Complete
 
-- [x] **Pluggable evidence sources**: Methodology documents, Data APIs (BLS, FRED, ECB, Census, Eurostat), Web search fallback.
+- [x] **Pluggable evidence sources**: Methodology KB, Data APIs (BLS, FRED, ECB, Census ACS, Eurostat), document index, web search fallback, scholar deep-research.
 - [x] **Deterministic routing + aggregation**: Claim router selects source strategy by claim type. Evidence aggregator scores relevance/confidence.
-- [x] **Retrieval memory + observability**: Retrieval run history, CLI diagnostics (`db-doctor`, `retrieval-stats`).
+- [x] **Retrieval memory + observability**: Run history, cache metrics, CLI diagnostics (`db-doctor`, `retrieval-stats`, `onboarding`).
 - [x] **Local-first default mode**: No API keys required for baseline functionality.
 
 ---
 
-## Phase 3: The Intelligence Layer (Current)
+## Phase 3: The Intelligence Layer ✅
 
-**Goal**: Move from a generic RAG pipeline to a mathematically rigorous specialized tool. 
+**Status**: Complete
 
-### Phase 3.1: The Knowledge Engine (Data Ingestion)
-- [ ] Build `crawl4ai` pipeline to autonomously ingest official methodology documentation from URLs in `MARINA.md`.
-- [ ] Materialize `pgai` embeddings to enable true semantic vector search for the `Archivist` agent.
+### 3.1: The Knowledge Engine
+- [x] Ingestion pipeline to load methodology documentation into document_chunks table.
+- [x] Materialized pgai embeddings (4096-dim, qwen3-embedding) enabling semantic vector search for the Archivist agent.
+- [x] 408 document chunks + 50 methodology change embeddings indexed.
 
-### Phase 3.2: The Math Engine (Econometric Rigor)
-- [ ] Upgrade the `Analyst` agent to perform rigorous statistical break detection (e.g., Chow Test) on live statistical data.
-- [ ] Wire the `Analyst`'s mathematical confidence scores into the evidence aggregator so the `Editor` cannot ignore structural breaks.
+### 3.2: The Math Engine
+- [x] Chow F-test structural break detection in the Analyst agent on live statistical data.
+- [x] Math confidence scores wired into evidence aggregator — Editor cannot ignore structural breaks.
+- [x] EU dataset routing (Eurostat LFS, HICP, ECB) alongside US sources.
+
+### 3.3: End-to-End Validation
+- [x] Eval harness: 39/40 (98%) on seed benchmark cases, avg 4.0s/claim, avg 81% confidence.
+- [x] Color-coded TUI with live pipeline spinner, confidence bars, and plain-English explanations.
+- [x] Portable packaging: single `uv run aletheia` entry point, all dependencies in core.
 
 ---
 
 ## Phase 4: Publication (Q2/Q3 2026)
 
 **Target**: JEBO (Journal of Economic Behavior and Organization)
+
+**Status**: Not started
 
 ### Paper Contributions
 
