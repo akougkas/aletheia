@@ -1,53 +1,36 @@
-"""Compose layering helpers for ALETHEIA local deployments."""
+"""Compose helpers for ALETHEIA local deployments (single-file + profiles)."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-CORE_COMPOSE_FILE = "docker-compose.yml"
-CRAWLER_COMPOSE_FILE = "docker-compose.crawler.yml"
-LOCAL_OLLAMA_COMPOSE_FILE = "docker-compose.local-ollama.yml"
+COMPOSE_FILE = "docker-compose.yml"
 
 
 @dataclass(frozen=True)
 class ComposePlan:
-    """Resolved compose file stack and command line."""
+    """Resolved compose command with optional profiles."""
 
     files: list[str]
+    profiles: list[str]
     command: list[str]
-
-
-def compose_file_stack(
-    *,
-    include_crawler: bool = False,
-    include_local_ollama: bool = False,
-) -> list[str]:
-    """Resolve compose files in deterministic layering order."""
-    files = [CORE_COMPOSE_FILE]
-    if include_crawler:
-        files.append(CRAWLER_COMPOSE_FILE)
-    if include_local_ollama:
-        files.append(LOCAL_OLLAMA_COMPOSE_FILE)
-    return files
 
 
 def compose_plan(
     *,
-    include_crawler: bool = False,
-    include_local_ollama: bool = False,
+    profiles: list[str] | None = None,
     action: str = "up",
     detach: bool = True,
 ) -> ComposePlan:
-    """Build a docker compose command from selected layers."""
-    files = compose_file_stack(
-        include_crawler=include_crawler,
-        include_local_ollama=include_local_ollama,
-    )
-    command = ["docker", "compose"]
-    for compose_file in files:
-        command.extend(["-f", compose_file])
+    """Build a docker compose command with optional profile flags."""
+    files = [COMPOSE_FILE]
+    active_profiles = profiles or []
+
+    command = ["docker", "compose", "-f", COMPOSE_FILE]
+    for profile in active_profiles:
+        command.extend(["--profile", profile])
     command.append(action)
     if detach and action == "up":
         command.append("-d")
-    return ComposePlan(files=files, command=command)
 
+    return ComposePlan(files=files, profiles=active_profiles, command=command)

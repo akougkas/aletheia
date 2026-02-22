@@ -26,7 +26,6 @@ from aletheia.tui import TerminalUI
 
 def _capability_rows() -> list[tuple[str, bool, str]]:
     crawl4ai_installed = importlib.util.find_spec("crawl4ai") is not None
-    crawl4ai_enabled = os.environ.get("ALETHEIA_ENABLE_CRAWL4AI_FALLBACK", "0") == "1"
     local_llm_endpoint = os.environ.get("ALETHEIA_LLM_BASE_URL", "http://127.0.0.1:1234")
     embed_endpoint = os.environ.get(
         "ALETHEIA_EMBED_BASE_URL",
@@ -67,12 +66,8 @@ def _capability_rows() -> list[tuple[str, bool, str]]:
         ("semantic_vector_search", semantic_ready, semantic_note),
         (
             "crawl4ai_fallback",
-            crawl4ai_enabled and crawl4ai_installed,
-            (
-                "enabled+installed"
-                if crawl4ai_enabled and crawl4ai_installed
-                else "set ALETHEIA_ENABLE_CRAWL4AI_FALLBACK=1 and install crawl4ai"
-            ),
+            crawl4ai_installed,
+            "installed (core dependency)" if crawl4ai_installed else "missing — reinstall with uv sync",
         ),
         ("fred_api_enhanced", bool(os.environ.get("FRED_API_KEY")), "optional API key"),
         ("census_api_enhanced", bool(os.environ.get("CENSUS_API_KEY")), "optional API key"),
@@ -1220,15 +1215,15 @@ async def show_onboarding(
     if all_ok:
         next_steps = [
             "You're all set! Try analyzing a claim:",
-            "  uv run python cli.py claim \"The US poverty rate increased by 3% in 2020\"",
+            "  uv run aletheia claim \"The US poverty rate increased by 3% in 2020\"",
             "Or start an interactive session:",
-            "  uv run python cli.py interactive",
+            "  uv run aletheia interactive",
         ]
     else:
         next_steps = []
         if not db_ok:
             next_steps.append("Start the database: docker compose up -d")
-            next_steps.append("Then re-run: uv run python cli.py onboarding")
+            next_steps.append("Then re-run: uv run aletheia onboarding")
         if not chat_ok:
             next_steps.append("Start your AI model server (LM Studio or Ollama)")
             next_steps.append("Load a chat model, then re-run this check")
@@ -1236,7 +1231,7 @@ async def show_onboarding(
             next_steps.append("Load an embedding model (e.g., qwen3-embedding in Ollama)")
         if db_ok and not semantic_ok:
             next_steps.append("Build the knowledge base:")
-            next_steps.append("  uv run python -m aletheia.ingest --seed-phase3 --materialize-embeddings")
+            next_steps.append("  uv run aletheia seed")
 
     ui.bullet_list("Next Steps", next_steps)
 
@@ -1306,7 +1301,7 @@ def _build_parser() -> argparse.ArgumentParser:
         target.add_argument("--db-url", default=None, help="Override ALETHEIA_DB_URL.")
 
     parser = argparse.ArgumentParser(
-        prog="cli.py",
+        prog="aletheia",
         description="ALETHEIA terminal interface.",
     )
     _add_runtime_args(parser)
@@ -1348,6 +1343,26 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("capabilities", help="Show capability matrix.", parents=[runtime_parent])
     sub.add_parser("onboarding", help="Run local-first setup checks.", parents=[runtime_parent])
+
+    seed_parser = sub.add_parser(
+        "seed",
+        help="Load benchmark seed data and Phase 3 methodology breaks into DB.",
+        parents=[runtime_parent],
+    )
+    seed_parser.add_argument(
+        "--no-validate", action="store_true", help="Skip seed validation queries."
+    )
+    seed_parser.add_argument(
+        "--no-phase3-breaks",
+        action="store_true",
+        help="Skip expanded Phase 3 methodology-break seed rows.",
+    )
+
+    sub.add_parser(
+        "ingest",
+        help="Ingest external documents into the knowledge base (Phase 6).",
+        parents=[runtime_parent],
+    )
 
     # Model management
     models_parser = sub.add_parser(
@@ -1393,6 +1408,8 @@ def _normalize_argv(argv: list[str]) -> list[str]:
         "db-doctor",
         "capabilities",
         "onboarding",
+        "seed",
+        "ingest",
         "models",
         "endpoints",
         "-h",
@@ -1708,6 +1725,24 @@ def main() -> int:
         return 0
     if command == "onboarding":
         return asyncio.run(show_onboarding(ui, resolved_profile=resolved_profile))
+    if command == "seed":
+        from aletheia.bootstrap import bootstrap_db
+
+        ui.info("Seeding database with benchmark cases and methodology breaks...")
+        try:
+            result = bootstrap_db(
+                include_seed=True,
+                include_validate=not getattr(args, "no_validate", False),
+                include_phase3_breaks=not getattr(args, "no_phase3_breaks", False),
+            )
+            ui.success(f"Seed complete: {result['actions']} (db: {result['db_url_redacted']})")
+            return 0
+        except Exception as exc:
+            ui.error(f"Seed failed: {exc}")
+            return 2
+    if command == "ingest":
+        ui.info("Not yet implemented. Coming in Phase 6.")
+        return 0
     if command == "models":
         return asyncio.run(show_models(ui, getattr(args, "models_action", None), args))
     if command == "endpoints":

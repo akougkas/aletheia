@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import importlib.util
 import os
 import re
 import time
@@ -35,7 +36,7 @@ class WebSearchClient:
         self.provider_chain = [item.strip().lower() for item in chain.split(",") if item.strip()]
         self.max_fetch_chars = int(os.environ.get("ALETHEIA_WEB_FETCH_MAX_CHARS", "6000"))
         self.max_fetch_docs = int(os.environ.get("ALETHEIA_WEB_FETCH_DOCS", "3"))
-        self.allow_crawl4ai = os.environ.get("ALETHEIA_ENABLE_CRAWL4AI_FALLBACK", "0") == "1"
+        self.allow_crawl4ai = importlib.util.find_spec("crawl4ai") is not None
         self.default_rate_limit_per_min = int(
             os.environ.get("ALETHEIA_WEB_DEFAULT_RATE_LIMIT_PER_MIN", "30")
         )

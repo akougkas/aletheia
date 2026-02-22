@@ -182,56 +182,42 @@ name = "aletheia"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "crawl4ai" },
     { name = "httpx" },
+    { name = "numpy" },
     { name = "pgai", extra = ["vectorizer-worker"] },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "pypdf" },
     { name = "rich" },
+    { name = "scipy" },
+    { name = "statsmodels" },
 ]
 
 [package.optional-dependencies]
-crawler = [
-    { name = "crawl4ai" },
-]
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
 ]
-math = [
-    { name = "numpy" },
-    { name = "scipy" },
-    { name = "statsmodels" },
-]
-research = [
-    { name = "crawl4ai" },
-]
-test = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
 
 [package.metadata]
 requires-dist = [
-    { name = "crawl4ai", marker = "extra == 'crawler'" },
-    { name = "crawl4ai", marker = "extra == 'research'" },
+    { name = "crawl4ai" },
     { name = "httpx", specifier = ">=0.27.0" },
-    { name = "numpy", marker = "extra == 'math'", specifier = ">=2.4.2" },
+    { name = "numpy", specifier = ">=2.4.2" },
     { name = "pgai", extras = ["vectorizer-worker"] },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pypdf", specifier = ">=6.7.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
-    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.24.0" },
     { name = "rich", specifier = ">=13.7.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.0" },
-    { name = "scipy", marker = "extra == 'math'", specifier = ">=1.17.0" },
-    { name = "statsmodels", marker = "extra == 'math'", specifier = ">=0.14.6" },
+    { name = "scipy", specifier = ">=1.17.0" },
+    { name = "statsmodels", specifier = ">=0.14.6" },
 ]
-provides-extras = ["math", "dev", "test", "crawler", "research"]
+provides-extras = ["dev"]
 
 [[package]]
 name = "alphashape"

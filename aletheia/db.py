@@ -174,7 +174,7 @@ def diagnose_connection_failure(exc: BaseException) -> dict[str, Any]:
         hints.extend(
             [
                 "Verify connection settings and DB server health.",
-                "Run `uv run python cli.py db-doctor` for full diagnostics.",
+                "Run `uv run aletheia db-doctor` for full diagnostics.",
             ]
         )
 

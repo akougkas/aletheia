@@ -11,28 +11,20 @@ dependencies = [
     "pydantic>=2.0.0",
     "rich>=13.7.0",
     "pypdf>=6.7.1",
-]
-
-[project.optional-dependencies]
-math = [
     "scipy>=1.17.0",
     "numpy>=2.4.2",
     "statsmodels>=0.14.6",
+    "crawl4ai",
 ]
+
+[project.scripts]
+aletheia = "cli:main"
+
+[project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.6.0",
-]
-test = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.24.0",
-]
-crawler = [
-    "crawl4ai",
-]
-research = [
-    "crawl4ai",
 ]
 
 [build-system]

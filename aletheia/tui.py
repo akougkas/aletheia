@@ -1,4 +1,4 @@
-"""Shared terminal UI helpers for CLI and demo surfaces."""
+"""Shared terminal UI helpers for the CLI."""
 
 from __future__ import annotations
 

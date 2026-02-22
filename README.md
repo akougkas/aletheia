@@ -99,20 +99,20 @@ ALETHEIA is designed as a research tool that works in multiple environments (mac
 # Copy .env.example to .env; edit ALETHEIA_DB_PORT=5433 if 5432 is busy:
 cp .env.example .env
 
-docker compose up -d                                 # Start core stack (app + Postgres + vectorizer worker)
-uv sync                                              # Install core runtime dependencies
-uv run python -m aletheia.bootstrap         # Install pgai + seed + validate (no psql required)
-uv run python -m aletheia.ingest            # Ingest MARINA docs/papers into documents/chunks
-uv run python -m aletheia.vectorizer        # Create embedding vectorizers
-uv run python demo.py --quick               # Run the demo
+docker compose up -d                                 # Start core stack (Postgres + vectorizer worker)
+uv sync                                              # Install all runtime dependencies
+uv run aletheia onboarding                           # Verify DB, LLM, and embeddings are healthy
+uv run aletheia seed                                 # Load benchmark seed data + methodology breaks
+uv run python -m aletheia.vectorizer                 # Create embedding vectorizers
+uv run aletheia claim "The US poverty rate increased by 3% in 2020"
 ```
 
 ### 2) Health checks
 
 ```bash
-uv run python cli.py db-doctor
-uv run python cli.py retrieval-stats --hours 24 --limit 10
-uv run python cli.py onboarding
+uv run aletheia db-doctor
+uv run aletheia retrieval-stats --hours 24 --limit 10
+uv run aletheia onboarding
 ```
 
 ### 3) Optional enhanced mode
@@ -150,98 +150,55 @@ Precedence (highest to lowest):
 Examples:
 
 ```bash
-uv run python cli.py onboarding
-uv run python cli.py onboarding --llm-base-url http://127.0.0.1:1234 --embed-base-url http://127.0.0.1:1234
-uv run python demo.py --quick --llm-model your-chat-model-id
+uv run aletheia onboarding
+uv run aletheia onboarding --llm-base-url http://127.0.0.1:1234 --embed-base-url http://127.0.0.1:1234
+uv run aletheia claim "EU unemployment fell in 2021" --llm-model your-chat-model-id
 ```
 
-### Docker Compose Layers (Core + Optional)
+### Docker Compose (single file with profiles)
 
-Core layer (default stack — uses `docker-compose.yml` automatically):
+Core stack (Postgres + vectorizer worker):
 
 ```bash
 docker compose up -d
 ```
 
-Core + crawler layer:
+With bundled Ollama (CPU):
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.crawler.yml up -d
+docker compose --profile ollama up -d
 ```
 
-Core + local Ollama helper:
+With bundled Ollama + NVIDIA GPU:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local-ollama.yml up -d
+docker compose --profile gpu up -d
 ```
 
-All layers:
+By default, model runtimes remain external (host LM Studio/Ollama). Profiles are opt-in only.
+
+### Dependencies (uv)
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.crawler.yml -f docker-compose.local-ollama.yml up -d
-```
-
-By default, model runtimes remain external (host LM Studio/Ollama). `local-ollama` is opt-in only.
-
-### Dependency Modes (uv)
-
-One command per mode:
-
-```bash
-# Core runtime only (default/product baseline)
+# All runtime dependencies (math, crawl4ai, etc. are core)
 uv sync
 
 # Dev + tests
 uv sync --extra dev
-
-# Crawler runtime dependencies
-uv sync --extra crawler
-
-# Research add-ons (currently includes crawler toolchain)
-uv sync --extra research
 ```
 
-Optional `make` shortcuts (same commands, less typing):
+### 4) Analyze claims
 
 ```bash
-make sync
-make test
-make onboarding
-make demo
-make demo-assert
+# Single claim
+uv run aletheia claim "The US poverty rate increased by 3% in 2020"
+
+# Interactive session
+uv run aletheia interactive
+
+# Plain-text mode for logs/CI
+uv run aletheia --plain claim "EU unemployment fell sharply in 2021"
 ```
-
-### 4) Demo modes (Phase 2 integration harness)
-
-Run the full non-interactive demo:
-
-```bash
-uv run python demo.py --quick
-```
-
-Plain-text mode for logs/CI:
-
-```bash
-uv run python demo.py --quick --plain
-```
-
-Baseline mode expectations (no optional API keys):
-- Executes full Phase 2 flow for each claim: parser -> router -> evidence sources -> aggregator -> editor -> verdict.
-- Prints routing plan, source execution counts, fallback/deep-research flags, aggregate confidence, budget skips, evidence scores, and verdict metadata.
-- Works without Google/Brave/SERP/FRED/Census keys; optional sources may report errors while the harness still completes.
-
-Strict verification mode (required markers enforced):
-
-```bash
-uv run python demo.py --quick --assert-phase2
-```
-
-`--assert-phase2` exits non-zero when required Phase 2 runtime signals are missing.
-
-Enhanced mode expectations (keys enabled):
-- Same harness, richer live evidence from optional providers.
-- Deep-research case can retrieve stronger `paper_scholar` results when `SERPAPI_API_KEY` is configured.
-- Web fallback coverage improves when Google/Brave keys are available.
 
 ### 5) CLI UX surfaces
 
@@ -251,25 +208,28 @@ and methodology decomposition — type `details` for the full breakdown.
 
 ```bash
 # Interactive session — type a claim, get a color-coded verdict panel
-uv run python cli.py interactive
+uv run aletheia interactive
 
 # Single claim analysis
-uv run python cli.py claim "The US poverty rate increased by 3% in 2020"
+uv run aletheia claim "The US poverty rate increased by 3% in 2020"
 
 # With full trace (routing, agent communication, AI reasoning)
-uv run python cli.py claim "EU unemployment fell sharply in 2021" --trace
+uv run aletheia claim "EU unemployment fell sharply in 2021" --trace
 
 # System health check (status dots, guided next steps)
-uv run python cli.py onboarding
+uv run aletheia onboarding
 
 # Database diagnostics
-uv run python cli.py db-doctor
+uv run aletheia db-doctor
 
 # Capability matrix
-uv run python cli.py capabilities
+uv run aletheia capabilities
+
+# Seed benchmark data into DB
+uv run aletheia seed
 
 # Plain-text mode (disable rich panels/colors — for logs, CI, or accessibility)
-uv run python cli.py --plain onboarding
+uv run aletheia --plain onboarding
 ```
 
 Interactive session commands after a verdict:
@@ -310,10 +270,6 @@ export SERPAPI_API_KEY=...
 export ALETHEIA_ENABLE_DEEP_RESEARCH=1
 export ALETHEIA_DEEP_RESEARCH_CONF_THRESHOLD=0.62
 
-# Optional Crawl4AI markdown fallback for weak/blocked HTML fetches
-# pip install crawl4ai
-export ALETHEIA_ENABLE_CRAWL4AI_FALLBACK=1
-
 # Provider guardrails (rate limit + circuit breaker)
 export ALETHEIA_WEB_RATE_LIMIT_PER_MIN="google:20,brave:30,duckduckgo:40,serpapi_google_scholar:15"
 export ALETHEIA_WEB_CIRCUIT_FAILURE_THRESHOLD=3
@@ -337,7 +293,7 @@ Design intent:
 Inspect retrieval history, source usage, and cache hit rates:
 
 ```bash
-uv run python cli.py retrieval-stats --hours 48 --limit 20
+uv run aletheia retrieval-stats --hours 48 --limit 20
 ```
 
 ### DB Doctor & Auth Troubleshooting
@@ -345,7 +301,7 @@ uv run python cli.py retrieval-stats --hours 48 --limit 20
 Run diagnostics:
 
 ```bash
-uv run python cli.py db-doctor
+uv run aletheia db-doctor
 ```
 
 `db-doctor` includes a capability matrix showing what is enabled by default (no-key baseline) versus optional API-key enhancements.
@@ -365,27 +321,24 @@ If reset is acceptable in this draft stage:
 ```bash
 docker compose down -v
 docker compose up -d
-uv run python -m aletheia.bootstrap
+uv run aletheia seed
 ```
 
 ### Troubleshooting Matrix
 
 | Subsystem | Typical symptom | Diagnosis path | Action |
 |---|---|---|---|
-| DB auth mismatch | `password authentication failed` | `uv run python cli.py db-doctor` | Align `ALETHEIA_DB_*` credentials with existing DB volume or recreate volume for local reset. |
-| Model not loaded | chat/embeddings return errors mentioning no models | `uv run python cli.py onboarding` | Load a model in LM Studio/Ollama and set `ALETHEIA_LLM_MODEL` / `ALETHEIA_EMBED_MODEL` if required. |
+| DB auth mismatch | `password authentication failed` | `uv run aletheia db-doctor` | Align `ALETHEIA_DB_*` credentials with existing DB volume or recreate volume for local reset. |
+| Model not loaded | chat/embeddings return errors mentioning no models | `uv run aletheia onboarding` | Load a model in LM Studio/Ollama and set `ALETHEIA_LLM_MODEL` / `ALETHEIA_EMBED_MODEL` if required. |
 | Embeddings unsupported | onboarding shows chat ready but embeddings not ready (`501`) | onboarding embedding diagnostics | Point `ALETHEIA_EMBED_BASE_URL` to an embedding-capable endpoint (for example local Ollama/LM Studio). |
 | Endpoint unreachable | `All connection attempts failed` | onboarding chat/embedding diagnostics | Verify host/IP/port, bind interface, and local runtime availability. |
 
 ### Dependency/Lock Strategy
 
-- Runtime dependencies stay minimal in `pyproject.toml` to keep installs fast and deterministic.
-- Optional dependency tiers:
-  - `dev` / `test`: local test tooling
-  - `crawler`: Crawl4AI runtime extras
-  - `research`: research-oriented extras
+- All runtime dependencies (math, crawl4ai, etc.) are in core `dependencies`.
+- Single optional extra: `dev` (pytest, ruff).
 - Use `uv lock` only when dependency declarations change.
-- Use `uv sync`, `uv sync --extra dev`, or `uv sync --extra crawler` based on your operating mode.
+- Use `uv sync` for runtime, `uv sync --extra dev` for development.
 
 ## Team
 

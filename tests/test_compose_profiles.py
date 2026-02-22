@@ -1,34 +1,35 @@
-from aletheia.compose import (
-    CORE_COMPOSE_FILE,
-    CRAWLER_COMPOSE_FILE,
-    LOCAL_OLLAMA_COMPOSE_FILE,
-    compose_file_stack,
-    compose_plan,
-)
+from aletheia.compose import COMPOSE_FILE, compose_plan
 
 
-def test_compose_file_stack_core_only():
-    assert compose_file_stack() == [CORE_COMPOSE_FILE]
+def test_compose_plan_core_only():
+    plan = compose_plan()
+    assert plan.files == [COMPOSE_FILE]
+    assert plan.profiles == []
+    assert plan.command == ["docker", "compose", "-f", COMPOSE_FILE, "up", "-d"]
 
 
-def test_compose_file_stack_with_all_layers():
-    assert compose_file_stack(include_crawler=True, include_local_ollama=True) == [
-        CORE_COMPOSE_FILE,
-        CRAWLER_COMPOSE_FILE,
-        LOCAL_OLLAMA_COMPOSE_FILE,
-    ]
-
-
-def test_compose_plan_command_for_up_detached():
-    plan = compose_plan(include_crawler=True, include_local_ollama=False)
-    assert plan.files == [CORE_COMPOSE_FILE, CRAWLER_COMPOSE_FILE]
+def test_compose_plan_with_ollama_profile():
+    plan = compose_plan(profiles=["ollama"])
+    assert plan.profiles == ["ollama"]
     assert plan.command == [
-        "docker",
-        "compose",
-        "-f",
-        CORE_COMPOSE_FILE,
-        "-f",
-        CRAWLER_COMPOSE_FILE,
-        "up",
-        "-d",
+        "docker", "compose", "-f", COMPOSE_FILE,
+        "--profile", "ollama",
+        "up", "-d",
     ]
+
+
+def test_compose_plan_with_gpu_profile():
+    plan = compose_plan(profiles=["gpu"])
+    assert plan.profiles == ["gpu"]
+    assert "--profile" in plan.command
+    assert "gpu" in plan.command
+
+
+def test_compose_plan_down_action():
+    plan = compose_plan(action="down")
+    assert plan.command == ["docker", "compose", "-f", COMPOSE_FILE, "down"]
+
+
+def test_compose_plan_no_detach():
+    plan = compose_plan(detach=False)
+    assert "-d" not in plan.command

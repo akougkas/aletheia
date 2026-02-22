@@ -1,34 +1,7 @@
 name: aletheia
 
 services:
-  aletheia-app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        ALETHEIA_EXTRAS: ""
-    image: aletheia/app:core
-    container_name: aletheia-app
-    command: ["sleep", "infinity"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      ALETHEIA_DB_HOST: postgres
-      ALETHEIA_DB_PORT: 5432
-      ALETHEIA_DB_NAME: ${ALETHEIA_DB_NAME:-aletheia}
-      ALETHEIA_DB_USER: ${ALETHEIA_DB_USER:-aletheia}
-      ALETHEIA_DB_PASSWORD: ${ALETHEIA_DB_PASSWORD:-aletheia}
-      ALETHEIA_LLM_BASE_URL: ${ALETHEIA_LLM_BASE_URL:-http://host.docker.internal:1234}
-      ALETHEIA_EMBED_BASE_URL: ${ALETHEIA_EMBED_BASE_URL:-http://host.docker.internal:1234}
-      ALETHEIA_WEB_SEARCH_PROVIDER: ${ALETHEIA_WEB_SEARCH_PROVIDER:-auto}
-      ALETHEIA_WEB_SEARCH_CHAIN: ${ALETHEIA_WEB_SEARCH_CHAIN:-brave,duckduckgo}
-      ALETHEIA_ENABLE_CRAWL4AI_FALLBACK: ${ALETHEIA_ENABLE_CRAWL4AI_FALLBACK:-0}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ./:/app
-
+  # --- ALWAYS ON ---
   postgres:
     image: pgvector/pgvector:pg16
     container_name: aletheia-db
@@ -46,6 +19,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 8
+    restart: unless-stopped
 
   vectorizer-worker:
     image: timescale/pgai-vectorizer-worker:latest
@@ -53,12 +27,43 @@ services:
     environment:
       PGAI_VECTORIZER_WORKER_DB_URL: postgres://${ALETHEIA_DB_USER:-aletheia}:${ALETHEIA_DB_PASSWORD:-aletheia}@postgres:5432/${ALETHEIA_DB_NAME:-aletheia}
       OPENAI_API_KEY: ${ALETHEIA_VECTORIZER_API_KEY:-not-needed}
-      OPENAI_BASE_URL: ${ALETHEIA_VECTORIZER_EMBED_BASE_URL:-http://host.docker.internal:1234/v1}
+      OPENAI_BASE_URL: ${ALETHEIA_VECTORIZER_EMBED_BASE_URL:-http://host.docker.internal:11434/v1}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
+
+  # --- PROFILE: ollama (CPU) ---
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aletheia-ollama
+    profiles: [ollama]
+    ports:
+      - "11434:11434"
+    volumes:
+      - aletheia_ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  # --- PROFILE: gpu (Ollama + NVIDIA) ---
+  ollama-gpu:
+    image: ollama/ollama:latest
+    container_name: aletheia-ollama
+    profiles: [gpu]
+    ports:
+      - "11434:11434"
+    volumes:
+      - aletheia_ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${OLLAMA_GPU_COUNT:-1}
+              capabilities: [gpu]
+    restart: unless-stopped
 
 volumes:
   aletheia_pgdata:
+  aletheia_ollama_data:
