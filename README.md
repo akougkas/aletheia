@@ -2,7 +2,7 @@
 
 > *Aletheia (ἀλήθεια): Greek for "truth" or "unconcealment" — the act of revealing what is hidden.*
 
-**ALETHEIA** is an autonomous AI platform that validates claims against evidence. Give it any claim — about economics, health, policy, or science — and it will search for supporting or contradicting evidence, flag methodology concerns, and explain its reasoning with full source citations.
+**ALETHEIA** is an autonomous AI platform that validates claims against evidence. Give it any claim about Macro-Economic & Public Health Official Statistics, and it will search for supporting or contradicting evidence, mathematically flag methodology breaks, and explain its reasoning with full source citations.
 
 ## The Vision
 
@@ -10,7 +10,7 @@ Today, misinformation spreads faster than verification. Policy analysts, researc
 
 ALETHEIA automates this process with a team of AI agents that:
 1. **Parse** any claim into structured components
-2. **Search** a knowledge base of trusted sources and academic papers
+2. **Search** a MARINA base of trusted sources and academic papers
 3. **Retrieve** relevant data from official APIs
 4. **Validate** the claim against evidence
 5. **Explain** the verdict with full provenance
@@ -63,7 +63,7 @@ ALETHEIA starts with a unique capability: **methodology awareness**. Official st
 
 Example: "E-cigarette use surged from 3.2% to 4.4% in 2019" sounds alarming. But ~half of that increase came from the CDC changing *how they asked the question*, not from more people vaping.
 
-ALETHEIA catches these breaks because it reads methodology documentation AND connects it to specific time periods and data points.
+ALETHEIA catches these breaks because it reads methodology documentation, retrieves raw statistical data, and mathematically confirms the structural break (e.g., using a Chow test).
 
 ## Current Status
 
