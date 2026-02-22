@@ -2,7 +2,7 @@
 
 import logging
 from typing import Optional
-from aletheia.llm import LLMClient, llm
+from aletheia.llm import CompletionResult, LLMClient, llm
 from aletheia.schema import AgentMessage
 
 
@@ -23,9 +23,24 @@ class Agent:
         *,
         temperature: float = 0.7,
         max_tokens: int = 2048,
-    ) -> str:
+        ) -> str:
         """Generate a response using the LLM."""
         return await self.llm.complete(
+            prompt,
+            system=self.system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+    async def think_with_reasoning(
+        self,
+        prompt: str,
+        *,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+    ) -> CompletionResult:
+        """Generate response with provider reasoning/thinking when available."""
+        return await self.llm.complete_with_reasoning(
             prompt,
             system=self.system_prompt,
             temperature=temperature,

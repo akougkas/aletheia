@@ -190,6 +190,11 @@ class EditorAgent(Agent):
             if isinstance(decomposition, dict)
             else None
         )
+        claim_value_check = (
+            analysis.get("claim_value_check")
+            if isinstance(analysis.get("claim_value_check"), dict)
+            else None
+        )
         low_methodology_share = (
             isinstance(methodology_share, (int, float)) and methodology_share < 0.15
         )
@@ -217,7 +222,18 @@ class EditorAgent(Agent):
             else:
                 status = VerdictStatus.PARTIALLY_SUPPORTED
 
-        caveats: list[str] = []
+        if claim_value_check and claim_value_check.get("within_tolerance") is False:
+            if status == VerdictStatus.SUPPORTED:
+                status = VerdictStatus.PARTIALLY_SUPPORTED
+            caveat = (
+                f"Claimed value deviates from retrieved series by {claim_value_check.get('absolute_delta')} "
+                f"(tolerance {claim_value_check.get('tolerance')})."
+            )
+            # Keep this caveat high in the list.
+            caveats = [caveat]
+        else:
+            caveats = []
+
         if historical_breaks:
             caveats.append(
                 "Historical methodology changes exist outside the claim window and may still influence long-run trends."
@@ -256,13 +272,13 @@ Status: {status.value}
 Comparability: {comparability.value}
 Severity: {severity.value}
 Methodology changes:
-{chr(10).join(f'- {change.change_type.value} ({change.effective_date}): {change.description}' for change in relevant_breaks[:4])}
+{chr(10).join(f"- {change.change_type.value} ({change.effective_date.isoformat() if change.effective_date else 'undated'}): {change.description}" for change in relevant_breaks[:4])}
 """
                 llm_summary = await self.think(prompt, temperature=0.2, max_tokens=220)
                 if llm_summary.strip():
                     summary = llm_summary.strip()
-            except Exception:
-                pass
+            except Exception as exc:
+                self.log(f"LLM summary refinement failed: {exc}", level=30)
 
         # Collect and de-duplicate sources/snippets from breaks + semantic evidence.
         sources = [change.source_url for change in breaks if change.source_url]

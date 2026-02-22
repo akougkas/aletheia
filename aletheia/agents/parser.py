@@ -15,7 +15,15 @@ class ClaimParserAgent(Agent):
     role = "Claim Parser"
     system_prompt = PARSER_SYSTEM_PROMPT
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.last_reasoning = ""
+
     async def parse(self, text: str) -> Optional[PolicyClaim]:
+        claim, _ = await self.parse_with_reasoning(text)
+        return claim
+
+    async def parse_with_reasoning(self, text: str) -> tuple[Optional[PolicyClaim], str]:
         """Parse a natural language claim into a structured PolicyClaim."""
         prompt = f'''Extract structured data from this policy claim. Return only JSON.
 
@@ -33,23 +41,25 @@ Return JSON with these fields:
 
 JSON:'''
 
-        response = await self.think(prompt, temperature=0.0, max_tokens=4096)
+        result = await self.think_with_reasoning(prompt, temperature=0.0, max_tokens=4096)
+        response = result.content
+        self.last_reasoning = result.reasoning
 
         # Extract JSON from response (handle markdown code blocks)
         json_str = self._extract_json(response)
         if not json_str:
             self.log(f"Failed to extract JSON from: {response[:100]}")
-            return None
+            return None, result.reasoning
 
         try:
             data = json.loads(json_str)
             # Map direction string to enum
             if "direction" in data and isinstance(data["direction"], str):
                 data["direction"] = Direction(data["direction"])
-            return PolicyClaim(original_text=text, **data)
+            return PolicyClaim(original_text=text, **data), result.reasoning
         except (json.JSONDecodeError, ValueError) as e:
             self.log(f"Parse error: {e}")
-            return None
+            return None, result.reasoning
 
     def _extract_json(self, text: str) -> Optional[str]:
         """Extract JSON object from text, handling code blocks."""

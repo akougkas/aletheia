@@ -36,6 +36,11 @@ class ArchivistAgent(Agent):
     role = "Data Provenance"
     system_prompt = "You identify methodology changes that could affect data interpretation."
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.last_doc_search_mode = "uninitialized"
+        self.last_break_search_mode = "uninitialized"
+
     def _normalize_dataset_code(self, value: str | None) -> str | None:
         if not value:
             return None
@@ -261,8 +266,11 @@ class ArchivistAgent(Agent):
                         (str(query_embedding), limit),
                     )
                 ).fetchall()
+            self.last_doc_search_mode = "semantic"
+            self.log(f"Semantic document search returned {len(rows)} rows")
             return [dict(row) for row in rows]
         except Exception as exc:  # noqa: BLE001
+            self.last_doc_search_mode = "lexical_fallback"
             self.log(
                 f"Semantic doc search unavailable, using lexical fallback: {exc}",
                 level=logging.WARNING,
@@ -287,8 +295,11 @@ class ArchivistAgent(Agent):
                         (str(query_embedding), limit),
                     )
                 ).fetchall()
+            self.last_break_search_mode = "semantic"
+            self.log(f"Semantic break search returned {len(rows)} rows")
             return [dict(row) for row in rows]
         except Exception as exc:  # noqa: BLE001
+            self.last_break_search_mode = "lexical_fallback"
             self.log(
                 f"Semantic break search unavailable, using lexical fallback: {exc}",
                 level=logging.WARNING,

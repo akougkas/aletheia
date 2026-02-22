@@ -485,6 +485,76 @@ class AnalystAgent(Agent):
 
         return points[-1]["value"] - points[0]["value"]
 
+    def _extract_claimed_value(self, claim: PolicyClaim) -> float | None:
+        """Extract a scalar claimed value from magnitude/text when available."""
+        if isinstance(claim.magnitude, (int, float)):
+            return float(claim.magnitude)
+        if isinstance(claim.magnitude, str):
+            match = re.search(r"-?\d+(?:\.\d+)?", claim.magnitude)
+            if match:
+                return float(match.group(0))
+
+        text = claim.original_text
+        percent_match = re.search(r"(-?\d+(?:\.\d+)?)\s*%", text)
+        if percent_match:
+            return float(percent_match.group(1))
+
+        number_match = re.search(r"\b(-?\d+(?:\.\d+)?)\b", text)
+        if number_match:
+            return float(number_match.group(1))
+        return None
+
+    def _target_value_from_points(
+        self,
+        claim: PolicyClaim,
+        points: list[dict[str, Any]],
+    ) -> tuple[float, str] | None:
+        if not points:
+            return None
+
+        target_year = extract_year(claim.period_end) or extract_year(claim.period_start)
+        if target_year is None:
+            last = points[-1]
+            return float(last["value"]), str(last["date"])
+
+        in_year = [p for p in points if extract_year(p.get("date")) == target_year]
+        if in_year:
+            avg_value = float(statistics.mean(float(p["value"]) for p in in_year))
+            return avg_value, str(in_year[-1]["date"])
+
+        nearest = min(
+            points,
+            key=lambda p: abs((extract_year(p.get("date")) or target_year) - target_year),
+        )
+        return float(nearest["value"]), str(nearest["date"])
+
+    def _check_claim_value(
+        self,
+        claim: PolicyClaim,
+        points: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Compare claimed scalar value vs retrieved series value near claim period."""
+        claimed = self._extract_claimed_value(claim)
+        if claimed is None or not points:
+            return None
+
+        observed = self._target_value_from_points(claim, points)
+        if observed is None:
+            return None
+
+        observed_value, observed_date = observed
+        tolerance = float(os.environ.get("ALETHEIA_CLAIM_VALUE_TOLERANCE", "0.5"))
+        delta = claimed - observed_value
+        return {
+            "claimed_value": round(claimed, 4),
+            "observed_value": round(observed_value, 4),
+            "observed_date": observed_date,
+            "delta": round(delta, 4),
+            "absolute_delta": round(abs(delta), 4),
+            "tolerance": tolerance,
+            "within_tolerance": abs(delta) <= tolerance,
+        }
+
     def _estimate_numeric_impact(self, impact_estimate: str | None) -> float | None:
         if not impact_estimate:
             return None
@@ -554,6 +624,7 @@ class AnalystAgent(Agent):
 
         break_result = None
         observed_change = None
+        claim_value_check = None
         if points:
             break_result = await self.detect_structural_break(
                 values,
@@ -561,11 +632,13 @@ class AnalystAgent(Agent):
                 hint_year=extract_year(claim.period_end) or extract_year(claim.period_start),
             )
             observed_change = self._observed_change(claim, points)
+            claim_value_check = self._check_claim_value(claim, points)
 
         return {
             "data_retrieved": bool(data.get("data_available")),
             "structural_break_detected": break_result,
             "observed_change": observed_change,
+            "claim_value_check": claim_value_check,
             "raw_data": data,
             "analysis_note": "Data retrieved from live APIs where connectors are available.",
         }
