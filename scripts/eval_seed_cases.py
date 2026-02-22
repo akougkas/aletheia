@@ -107,38 +107,67 @@ def _build_claim(case: dict[str, Any]) -> str:
     return _GENERIC_TEMPLATE.format(indicator=indicator, year=year)
 
 
+def _extract_break_year(brk_date: Any) -> int | None:
+    if isinstance(brk_date, str) and len(brk_date) >= 4:
+        try:
+            return int(brk_date[:4])
+        except ValueError:
+            return None
+    elif isinstance(brk_date, date):
+        return brk_date.year
+    return None
+
+
 def _break_matches(verdict_breaks: list[dict[str, Any]], case: dict[str, Any]) -> bool:
-    """Check if any break in the verdict matches the benchmark case."""
+    """Check if any break in the verdict matches the benchmark case.
+
+    Match tiers (first match wins):
+    1. Exact type + exact year
+    2. Same type + adjacent year (±1)
+    3. Same year + keyword overlap (≥4 words) in description
+    4. Adjacent year + keyword overlap (≥5 words) in description
+    """
     target_type = case.get("change_type", "")
     target_date = case.get("effective_date")
     target_year = target_date.year if target_date else None
     target_desc = (case.get("description") or "").lower()
+    target_words = set(target_desc.split())
 
     for brk in verdict_breaks:
         brk_type = brk.get("change_type", "")
         brk_date = brk.get("effective_date")
-        brk_desc = (brk.get("description") or "").lower()
+        brk_year = _extract_break_year(brk_date)
 
-        # Exact type + year match.
-        brk_year = None
-        if isinstance(brk_date, str) and len(brk_date) >= 4:
-            try:
-                brk_year = int(brk_date[:4])
-            except ValueError:
-                pass
-        elif isinstance(brk_date, date):
-            brk_year = brk_date.year
-
+        # Tier 1: exact type + exact year.
         if brk_type == target_type and brk_year == target_year:
             return True
 
-        # Fuzzy: same year + significant keyword overlap in description.
-        if brk_year == target_year:
-            target_words = set(target_desc.split())
-            brk_words = set(brk_desc.split())
-            overlap = len(target_words & brk_words)
-            if overlap >= 4:
-                return True
+        # Tier 2: same type + adjacent year.
+        if (
+            brk_type == target_type
+            and brk_year is not None
+            and target_year is not None
+            and abs(brk_year - target_year) <= 1
+        ):
+            return True
+
+    # Tier 3 & 4: description keyword overlap.
+    for brk in verdict_breaks:
+        brk_date = brk.get("effective_date")
+        brk_year = _extract_break_year(brk_date)
+        brk_desc = (brk.get("description") or "").lower()
+        brk_words = set(brk_desc.split())
+        overlap = len(target_words & brk_words)
+
+        if brk_year == target_year and overlap >= 4:
+            return True
+        if (
+            brk_year is not None
+            and target_year is not None
+            and abs(brk_year - target_year) <= 1
+            and overlap >= 5
+        ):
+            return True
 
     return False
 

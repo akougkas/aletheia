@@ -611,6 +611,22 @@ class EvidenceAggregator:
         tokens = re.findall(r"[a-z0-9-]+", base.lower())
         return {token for token in tokens if len(token) >= 4}
 
+    _us_markers = {"bls", "census", "fred", "american", "united states"}
+    _eu_markers = {"eurostat", "euro area", "eurozone", "european", "hicp", "eu-lfs", "eu-silc", "ecb"}
+
+    def _claim_geography(self, claim: PolicyClaim) -> str:
+        """Return 'us', 'eu', or '' based on claim context."""
+        text = f"{claim.geography or ''} {claim.original_text} {claim.dataset or ''}".lower()
+        if any(m in text for m in self._eu_markers) or any(
+            m in text for m in {"eu ", "eu-"}
+        ):
+            return "eu"
+        if any(m in text for m in self._us_markers) or any(
+            m in text for m in {"usa", "u.s."}
+        ):
+            return "us"
+        return ""
+
     def _score_relevance(self, claim: PolicyClaim, doc: dict[str, Any]) -> float:
         claim_tokens = self._claim_tokens(claim)
         if not claim_tokens:
@@ -635,7 +651,15 @@ class EvidenceAggregator:
         dataset = (claim.dataset or "").lower().strip()
         dataset_bonus = 0.1 if dataset and dataset in payload else 0.0
 
-        return max(0.0, min(1.0, overlap_score + indicator_bonus + dataset_bonus))
+        # Geography mismatch penalty: penalize US docs for EU claims and vice versa.
+        geo_penalty = 0.0
+        claim_geo = self._claim_geography(claim)
+        if claim_geo == "eu" and any(m in payload for m in self._us_markers):
+            geo_penalty = 0.25
+        elif claim_geo == "us" and any(m in payload for m in self._eu_markers):
+            geo_penalty = 0.25
+
+        return max(0.0, min(1.0, overlap_score + indicator_bonus + dataset_bonus - geo_penalty))
 
     def _score_confidence(
         self,

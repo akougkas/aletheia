@@ -642,9 +642,12 @@ class AnalystAgent(Agent):
         if percent_match:
             return float(percent_match.group(1))
 
-        number_match = re.search(r"\b(-?\d+(?:\.\d+)?)\b", text)
-        if number_match:
-            return float(number_match.group(1))
+        # Match bare numbers but skip values that look like years (1900-2099).
+        for m in re.finditer(r"\b(-?\d+(?:\.\d+)?)\b", text):
+            value = float(m.group(1))
+            if 1900 <= value <= 2099 and value == int(value):
+                continue
+            return value
         return None
 
     def _target_value_from_points(

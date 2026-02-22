@@ -314,9 +314,19 @@ Methodology changes:
                 deduped_sources.append(source)
 
         evidence_snippets: list[str] = []
-        for row in evidence_docs[:3]:
+        seen_titles: set[str] = set()
+        for row in evidence_docs[:6]:
             title = row.get("title") or "Untitled source"
+            # Deduplicate by title — same-source evidence appears once.
+            title_key = title.lower().strip()
+            if title_key in seen_titles:
+                continue
+            seen_titles.add(title_key)
             content = (row.get("content") or "").strip()
+            # Strip repeated title prefix that leaks from stored evidence.
+            title_prefix = title.strip()
+            while content.startswith(title_prefix):
+                content = content[len(title_prefix):].lstrip(": ")
             snippet = content[:180] + ("..." if len(content) > 180 else "")
             if snippet:
                 relevance = row.get("relevance_score")
@@ -332,6 +342,8 @@ Methodology changes:
                     )
                 else:
                     evidence_snippets.append(f"{title}: {snippet}")
+            if len(evidence_snippets) >= 3:
+                break
 
         confidence = 0.45
         if analysis.get("data_retrieved"):

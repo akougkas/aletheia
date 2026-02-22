@@ -92,6 +92,42 @@ def test_evidence_aggregator_ranks_relevant_items_with_scores():
     )
 
 
+def test_evidence_aggregator_penalizes_geography_mismatch():
+    """BLS docs should score lower than Eurostat docs for EU claims."""
+    claim = _claim(
+        "EU-LFS",
+        "unemployment rate",
+        "EU unemployment fell sharply in 2021.",
+    )
+    aggregator = EvidenceAggregator(SourceRegistry.default())
+    plan = RoutingPlan(
+        claim_type=ClaimType.STATISTICAL_FACT,
+        source_ids=["data_api", "methodology_kb"],
+    )
+    outputs = [
+        SourceOutput(
+            source_id="data_api",
+            evidence_docs=[
+                {
+                    "title": "EUROSTAT connector evidence",
+                    "content": "EUROSTAT returned 312 points for unemployment rate.",
+                    "url": None,
+                },
+                {
+                    "title": "BLS connector evidence",
+                    "content": "BLS returned 48 points for unemployment rate.",
+                    "url": None,
+                },
+            ],
+        ),
+    ]
+
+    aggregated = aggregator.aggregate(claim, plan, outputs)
+    eurostat_doc = next(d for d in aggregated.evidence_docs if "EUROSTAT" in d["title"])
+    bls_doc = next(d for d in aggregated.evidence_docs if "BLS" in d["title"])
+    assert eurostat_doc["relevance_score"] > bls_doc["relevance_score"]
+
+
 class _StaticSource:
     def __init__(self, source_id: str, output: SourceOutput):
         self.source_id = source_id

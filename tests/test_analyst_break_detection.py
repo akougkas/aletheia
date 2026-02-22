@@ -77,3 +77,23 @@ def test_extract_claimed_value_prefers_magnitude_field():
     analyst = AnalystAgent.__new__(AnalystAgent)
     claim = _claim("placeholder text", magnitude="12.4%")
     assert analyst._extract_claimed_value(claim) == 12.4
+
+
+def test_extract_claimed_value_skips_year_as_number():
+    """Year-like numbers (2020, 2021) should not be extracted as claimed values."""
+    analyst = AnalystAgent.__new__(AnalystAgent)
+    claim = _claim("EU unemployment fell sharply in 2021")
+    result = analyst._extract_claimed_value(claim)
+    assert result is None  # no real numeric value in text
+
+
+def test_extract_claimed_value_extracts_percent_before_year():
+    analyst = AnalystAgent.__new__(AnalystAgent)
+    claim = _claim("Poverty increased by 3% in 2020")
+    assert analyst._extract_claimed_value(claim) == 3.0
+
+
+def test_extract_claimed_value_extracts_non_year_number():
+    analyst = AnalystAgent.__new__(AnalystAgent)
+    claim = _claim("GDP grew by 5.2 percentage points in 2021")
+    assert analyst._extract_claimed_value(claim) == 5.2
