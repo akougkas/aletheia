@@ -43,7 +43,7 @@ class AnalystAgent(Agent):
         value = dataset.strip().upper().replace("_", "-")
         alias_map = {
             "EU SILC": "EU-SILC",
-            "EU-LFS ": "EU-LFS",
+            "EU-LFS": "EU-LFS",
             "ESA 2010": "ESA2010",
             "EURO AREA": "ECB",
             "EUROZONE": "ECB",
@@ -53,12 +53,20 @@ class AnalystAgent(Agent):
 
     def _indicator_hint(self, claim: PolicyClaim) -> str:
         text = f"{claim.indicator} {claim.original_text}".lower()
-        if "unemployment" in text:
+        if "unemployment" in text or "employment" in text:
             return "unemployment"
         if "inflation" in text or "cpi" in text or "hicp" in text:
             return "inflation"
         if "gdp" in text:
             return "gdp"
+        if "poverty" in text or "at risk of poverty" in text:
+            return "poverty"
+        if "income" in text or "median income" in text:
+            return "income"
+        if "mortality" in text or "death" in text or "life expectancy" in text:
+            return "mortality"
+        if "health" in text or "nhis" in text or "insurance" in text:
+            return "health"
         return "generic"
 
     def _is_eu_context(self, claim: PolicyClaim) -> bool:
@@ -66,6 +74,15 @@ class AnalystAgent(Agent):
         text = f"{claim.geography or ''} {claim.original_text}".lower()
         eu_markers = {"euro area", "eurozone", "eu ", "eu-", "european union", "eurostat"}
         return any(m in text for m in eu_markers)
+
+    def _is_us_context(self, claim: PolicyClaim) -> bool:
+        """Detect if the claim is about US data."""
+        geo = (claim.geography or "").lower()
+        if geo in {"usa", "us", "united states"}:
+            return True
+        text = f"{claim.geography or ''} {claim.original_text}".lower()
+        us_markers = {"usa", "united states", "u.s.", "american"}
+        return any(m in text for m in us_markers)
 
     async def _fetch_bls_series(
         self, series_id: str, start_year: int, end_year: int
@@ -259,9 +276,11 @@ class AnalystAgent(Agent):
                 dataset = "HICP"
             elif hint == "gdp":
                 dataset = "ECB"
+            elif hint == "poverty":
+                dataset = "EU-SILC"
 
         try:
-            if dataset in {"CPS", "CPI", "BLS"} or (not dataset and hint in {"unemployment", "inflation"}):
+            if dataset in {"CPS", "CPI", "BLS"} or (not dataset and hint in {"unemployment", "inflation"} and self._is_us_context(claim)):
                 series_id = "LNS14000000" if hint == "unemployment" else "CUUR0000SA0"
                 points = await self._fetch_bls_series(series_id, start_year, end_year)
                 return {
@@ -286,6 +305,27 @@ class AnalystAgent(Agent):
                     "note": "Census ACS API",
                 }
 
+            if not dataset and hint in {"poverty", "income"} and self._is_us_context(claim):
+                points = await self._fetch_acs_median_income(start_year, end_year)
+                return {
+                    "source": "CENSUS",
+                    "series_id": "ACS1_B19013_001E_US",
+                    "dataset": "ACS",
+                    "indicator": claim.indicator,
+                    "points": points,
+                    "data_available": len(points) > 0,
+                    "note": "Census ACS API (inferred from indicator)",
+                }
+
+            if not dataset and hint in {"mortality", "health"}:
+                return {
+                    "source": "unknown",
+                    "indicator": claim.indicator,
+                    "points": [],
+                    "data_available": False,
+                    "note": f"No connector for {hint} data yet",
+                }
+
             # Route generic "EU" dataset based on indicator hint.
             if dataset == "EU":
                 if hint == "unemployment":
@@ -294,6 +334,8 @@ class AnalystAgent(Agent):
                     dataset = "HICP"
                 elif hint == "gdp":
                     dataset = "ECB"
+                elif hint == "poverty":
+                    dataset = "EU-SILC"
 
             if dataset in {"EU-LFS", "HICP"}:
                 if dataset == "EU-LFS":
@@ -380,7 +422,7 @@ class AnalystAgent(Agent):
                     "note": "ECB SDMX API",
                 }
 
-            if dataset in {"FRED", "ESA2010"} or hint == "gdp":
+            if dataset == "FRED" or (hint == "gdp" and self._is_us_context(claim)):
                 fred_series = "GDP" if hint == "gdp" else "UNRATE"
                 points = await self._fetch_fred_series(fred_series)
                 return {
