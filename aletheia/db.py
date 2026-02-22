@@ -116,6 +116,13 @@ def get_db_url(*, redacted: bool = False) -> str:
 DB_URL = get_db_url()
 
 
+def refresh_db_url_alias() -> str:
+    """Refresh backward-compatible DB_URL alias after env/profile changes."""
+    global DB_URL
+    DB_URL = get_db_url()
+    return DB_URL
+
+
 def diagnose_connection_failure(exc: BaseException) -> dict[str, Any]:
     """Return actionable diagnosis hints for DB connection failures."""
     msg = str(exc)
@@ -229,6 +236,44 @@ def _test_connection_sync() -> dict[str, Any]:
                 )
                 tables = cur.fetchall()
 
+                cur.execute(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM information_schema.views
+                        WHERE table_schema = 'public' AND table_name = 'document_chunks_embedding'
+                    ) AS doc_view,
+                    EXISTS(
+                        SELECT 1
+                        FROM information_schema.views
+                        WHERE table_schema = 'public' AND table_name = 'methodology_changes_embedding'
+                    ) AS break_view
+                    """
+                )
+                semantic_views = cur.fetchone() or {}
+
+                cur.execute("SELECT COUNT(*) AS count FROM methodology_changes")
+                method_change_count = int((cur.fetchone() or {}).get("count", 0))
+
+                cur.execute("SELECT COUNT(*) AS count FROM document_chunks")
+                doc_chunk_count = int((cur.fetchone() or {}).get("count", 0))
+
+                method_embed_count = 0
+                doc_embed_count = 0
+                if semantic_views.get("doc_view"):
+                    cur.execute("SELECT COUNT(*) AS count FROM document_chunks_embedding")
+                    doc_embed_count = int((cur.fetchone() or {}).get("count", 0))
+                if semantic_views.get("break_view"):
+                    cur.execute("SELECT COUNT(*) AS count FROM methodology_changes_embedding")
+                    method_embed_count = int((cur.fetchone() or {}).get("count", 0))
+
+                semantic_ready = bool(
+                    semantic_views.get("doc_view")
+                    and semantic_views.get("break_view")
+                    and (doc_chunk_count == 0 or doc_embed_count > 0)
+                    and (method_change_count == 0 or method_embed_count > 0)
+                )
+
         return {
             "ok": True,
             "db_url_redacted": get_db_url(redacted=True),
@@ -236,6 +281,17 @@ def _test_connection_sync() -> dict[str, Any]:
             "pgvector_enabled": ext_check["exists"] if ext_check else False,
             "pgai_installed": pgai_check["exists"] if pgai_check else False,
             "tables": [t["tablename"] for t in tables],
+            "semantic_search_ready": semantic_ready,
+            "semantic_views": {
+                "document_chunks_embedding": bool(semantic_views.get("doc_view")),
+                "methodology_changes_embedding": bool(semantic_views.get("break_view")),
+            },
+            "counts": {
+                "methodology_changes": method_change_count,
+                "document_chunks": doc_chunk_count,
+                "methodology_embeddings": method_embed_count,
+                "document_embeddings": doc_embed_count,
+            },
         }
     except Exception as exc:  # noqa: BLE001
         return {

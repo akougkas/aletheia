@@ -1,6 +1,6 @@
 """Pydantic models for ALETHEIA's core data structures."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Optional, Any
 from pydantic import BaseModel, Field
@@ -121,7 +121,7 @@ class AgentMessage(BaseModel):
     receiver: str
     msg_type: str  # 'request', 'response', 'error'
     payload: Any
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     trace_id: Optional[str] = None
 
 

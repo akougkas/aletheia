@@ -8,14 +8,14 @@ from pathlib import Path
 from typing import Mapping
 
 DEFAULT_PROFILE = "zbook-single"
-PROFILE_CHOICES = ("zbook-single", "homelab-dev")
 
 _BASE_SOURCE_BUDGET = "methodology_kb:1,data_api:1,document_index:1,web_fallback:1,paper_scholar:1"
 
 PROFILE_DEFAULTS: dict[str, dict[str, str]] = {
     "zbook-single": {
         "ALETHEIA_LLM_BASE_URL": "http://127.0.0.1:1234",
-        "ALETHEIA_EMBED_BASE_URL": "http://127.0.0.1:1234",
+        "ALETHEIA_EMBED_BASE_URL": "http://127.0.0.1:11434",
+        "ALETHEIA_EMBED_MODEL": "qwen3-embedding:8b",
         "ALETHEIA_WEB_SEARCH_PROVIDER": "auto",
         "ALETHEIA_WEB_SEARCH_CHAIN": "brave,duckduckgo",
         "ALETHEIA_ENABLE_CRAWL4AI_FALLBACK": "1",
@@ -24,7 +24,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, str]] = {
         "ALETHEIA_ENABLE_DEEP_RESEARCH": "0",
         "ALETHEIA_SOURCE_BUDGET_PER_RUN": _BASE_SOURCE_BUDGET,
         "ALETHEIA_DB_HOST": "localhost",
-        "ALETHEIA_DB_PORT": "5432",
+        "ALETHEIA_DB_PORT": "5433",
         "ALETHEIA_DB_NAME": "aletheia",
         "ALETHEIA_DB_USER": "aletheia",
         "ALETHEIA_DB_PASSWORD": "aletheia",
@@ -52,6 +52,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, str]] = {
         "ALETHEIA_DB_PASSWORD": "aletheia",
     },
 }
+PROFILE_CHOICES = tuple(PROFILE_DEFAULTS.keys())
 
 
 @dataclass(frozen=True)
@@ -171,4 +172,11 @@ def apply_runtime_profile(
     )
     for key, value in resolved.values.items():
         os.environ[key] = value
+    try:
+        from aletheia.db import refresh_db_url_alias
+
+        refresh_db_url_alias()
+    except ImportError:
+        # DB module may not be imported yet; skip best-effort alias sync.
+        pass
     return resolved
