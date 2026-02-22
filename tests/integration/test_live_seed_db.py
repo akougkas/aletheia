@@ -6,7 +6,7 @@ import pytest
 
 from aletheia.agents.archivist import ArchivistAgent
 from aletheia.db import DB_URL
-from aletheia.ingest import ingest_marina_corpus
+from aletheia.ingest import ingest_MARINA_corpus
 from aletheia.schema import Direction, PolicyClaim
 
 
@@ -41,7 +41,7 @@ def seeded_db():
             cur.execute(validate_sql)
         conn.commit()
 
-    ingest_marina_corpus(ROOT / "MARINA.md")
+    ingest_MARINA_corpus(ROOT / "MARINA.md")
     return True
 
 
@@ -77,7 +77,7 @@ def test_seeded_cases_have_indicator_links(seeded_db):
 
 
 @pytest.mark.integration
-def test_ingested_marina_chunks_exist(seeded_db):
+def test_ingested_MARINA_chunks_exist(seeded_db):
     with psycopg.connect(DB_URL) as conn:
         with conn.cursor() as cur:
             cur.execute(
