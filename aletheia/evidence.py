@@ -753,14 +753,24 @@ class EvidencePipeline:
         self._run_source_calls: dict[str, int] = defaultdict(int)
         self._run_source_skips: dict[str, int] = defaultdict(int)
 
-    async def collect(self, claim: PolicyClaim) -> AggregatedEvidence:
-        return await self.collect_with_progress(claim, progress_callback=None)
+    async def collect(
+        self,
+        claim: PolicyClaim,
+        *,
+        case_id: str | None = None,
+    ) -> AggregatedEvidence:
+        return await self.collect_with_progress(
+            claim,
+            progress_callback=None,
+            case_id=case_id,
+        )
 
     async def collect_with_progress(
         self,
         claim: PolicyClaim,
         *,
         progress_callback: Callable[[dict[str, Any]], Any] | None,
+        case_id: str | None = None,
     ) -> AggregatedEvidence:
         self._refresh_runtime_flags()
         self._reset_run_state()
@@ -776,7 +786,7 @@ class EvidencePipeline:
         )
         run_id: str | None = None
         if self.retrieval_store:
-            run_id = await self.retrieval_store.begin_run(claim, plan)
+            run_id = await self.retrieval_store.begin_run(claim, plan, case_id=case_id)
 
         outputs = await self._collect_sources(
             plan.source_ids,
@@ -814,6 +824,8 @@ class EvidencePipeline:
 
         aggregated.analysis["deep_research_used"] = deep_research_used
         aggregated.analysis["ambiguous_evidence"] = self._is_ambiguous(aggregated)
+        if run_id is not None:
+            aggregated.analysis["session_id"] = run_id
         provider_budget_summary, provider_budget_skips = self._collect_provider_budget_report()
         source_budget_summary = {
             "calls": dict(self._run_source_calls),

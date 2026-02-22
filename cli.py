@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import csv
 import importlib.util
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -26,7 +28,9 @@ from aletheia.tui import TerminalUI
 
 def _capability_rows() -> list[tuple[str, bool, str]]:
     crawl4ai_installed = importlib.util.find_spec("crawl4ai") is not None
-    local_llm_endpoint = os.environ.get("ALETHEIA_LLM_BASE_URL", "http://127.0.0.1:1234")
+    local_llm_endpoint = os.environ.get(
+        "ALETHEIA_LLM_BASE_URL", "http://127.0.0.1:1234"
+    )
     embed_endpoint = os.environ.get(
         "ALETHEIA_EMBED_BASE_URL",
         os.environ.get("ALETHEIA_LLM_BASE_URL", "http://127.0.0.1:1234"),
@@ -67,10 +71,16 @@ def _capability_rows() -> list[tuple[str, bool, str]]:
         (
             "crawl4ai_fallback",
             crawl4ai_installed,
-            "installed (core dependency)" if crawl4ai_installed else "missing — reinstall with uv sync",
+            "installed (core dependency)"
+            if crawl4ai_installed
+            else "missing — reinstall with uv sync",
         ),
         ("fred_api_enhanced", bool(os.environ.get("FRED_API_KEY")), "optional API key"),
-        ("census_api_enhanced", bool(os.environ.get("CENSUS_API_KEY")), "optional API key"),
+        (
+            "census_api_enhanced",
+            bool(os.environ.get("CENSUS_API_KEY")),
+            "optional API key",
+        ),
     ]
 
 
@@ -102,9 +112,11 @@ _CAPABILITY_FRIENDLY = {
 
 def _render_capabilities(ui: TerminalUI) -> None:
     rows = [
-        [_CAPABILITY_FRIENDLY.get(name, name),
-         "Active" if enabled else "Inactive",
-         note]
+        [
+            _CAPABILITY_FRIENDLY.get(name, name),
+            "Active" if enabled else "Inactive",
+            note,
+        ]
         for name, enabled, note in _capability_rows()
     ]
     ui.table("Available Capabilities", ["Feature", "Status", "Details"], rows)
@@ -142,12 +154,17 @@ def _render_help(ui: TerminalUI) -> None:
             "  [bold]help[/bold]       Show this help\n"
             "  [bold]quit[/bold]       Exit Aletheia"
         )
-        ui.console.print(RichPanel(body, title="[bold]Commands[/bold]",
-                                   border_style="cyan", padding=(1, 2)))
+        ui.console.print(
+            RichPanel(
+                body, title="[bold]Commands[/bold]", border_style="cyan", padding=(1, 2)
+            )
+        )
     else:
         print("\n--- Commands ---")
         print("  After a verdict:")
-        print("    details    Full breakdown — caveats, data sources, routing, AI reasoning")
+        print(
+            "    details    Full breakdown — caveats, data sources, routing, AI reasoning"
+        )
         print("    trail      List all documents and data used as evidence")
         print("    trail 3    Inspect a specific evidence document by number")
         print("    trace      See how the AI agents communicated internally")
@@ -181,8 +198,11 @@ def _render_verdict_rich(ui: TerminalUI, verdict, *, verbose: bool = False) -> N
     conf_bar = ui.confidence_bar(verdict.confidence)
 
     # Status-aware border color
-    border = {"SUPPORTED": "green", "PARTIALLY_SUPPORTED": "yellow",
-              "MISLEADING": "red"}.get(verdict.status.value, "cyan")
+    border = {
+        "SUPPORTED": "green",
+        "PARTIALLY_SUPPORTED": "yellow",
+        "MISLEADING": "red",
+    }.get(verdict.status.value, "cyan")
 
     lines = [
         f"{status_str}  ({conf_str} confidence)    severity: {sev_str}",
@@ -205,7 +225,11 @@ def _render_verdict_rich(ui: TerminalUI, verdict, *, verbose: bool = False) -> N
         n = len(verdict.breaks_found)
         lines.append(f"[bold]Detected {n} statistical methodology change(s):[/bold]")
         for change in verdict.breaks_found[:limit]:
-            date_str = change.effective_date.isoformat() if change.effective_date else "unknown"
+            date_str = (
+                change.effective_date.isoformat()
+                if change.effective_date
+                else "unknown"
+            )
             ctype = change.change_type.value.replace("_", " ")
             impact = (change.impact_estimate or "")[:60]
             lines.append(f"  {date_str}  [dim]{ctype}[/dim] — {impact}")
@@ -225,7 +249,9 @@ def _render_verdict_rich(ui: TerminalUI, verdict, *, verbose: bool = False) -> N
 
     if not verbose:
         lines.append("")
-        lines.append("[dim]Type 'details' for full analysis, 'trail' for evidence sources[/dim]")
+        lines.append(
+            "[dim]Type 'details' for full analysis, 'trail' for evidence sources[/dim]"
+        )
 
     body = "\n".join(lines)
     assert ui.console is not None
@@ -282,7 +308,11 @@ def _render_verdict_plain(ui: TerminalUI, verdict, *, verbose: bool = False) -> 
         n = len(verdict.breaks_found)
         print(f"\n  Detected {n} statistical methodology change(s):")
         for change in verdict.breaks_found[:limit]:
-            date_str = change.effective_date.isoformat() if change.effective_date else "unknown"
+            date_str = (
+                change.effective_date.isoformat()
+                if change.effective_date
+                else "unknown"
+            )
             ctype = change.change_type.value.replace("_", " ")
             impact = (change.impact_estimate or "")[:60]
             print(f"    {date_str}  {ctype} — {impact}")
@@ -312,21 +342,29 @@ def _render_verdict_detail_sections(ui: TerminalUI, verdict) -> None:
     if verdict.breaks_found:
         rows: list[list[str]] = []
         for change in verdict.breaks_found:
-            rows.append([
-                change.effective_date.isoformat() if change.effective_date else "unknown",
-                change.change_type.value.replace("_", " "),
-                (change.impact_estimate or "")[:80],
-            ])
+            rows.append(
+                [
+                    change.effective_date.isoformat()
+                    if change.effective_date
+                    else "unknown",
+                    change.change_type.value.replace("_", " "),
+                    (change.impact_estimate or "")[:80],
+                ]
+            )
         ui.table("All Methodology Changes", ["Date", "Type", "Impact"], rows)
 
     if verdict.caveats:
         ui.bullet_list("Caveats & Limitations", verdict.caveats)
 
     if verdict.sources:
-        ui.bullet_list("Data Sources Used", [str(source) for source in verdict.sources[:5]])
+        ui.bullet_list(
+            "Data Sources Used", [str(source) for source in verdict.sources[:5]]
+        )
 
     if verdict.evidence_snippets:
-        ui.bullet_list("Key Evidence", [str(item) for item in verdict.evidence_snippets[:3]])
+        ui.bullet_list(
+            "Key Evidence", [str(item) for item in verdict.evidence_snippets[:3]]
+        )
 
 
 def _render_run_details(ui: TerminalUI, run: dict[str, Any]) -> None:
@@ -339,9 +377,15 @@ def _render_run_details(ui: TerminalUI, run: dict[str, Any]) -> None:
             "How Aletheia Searched (Routing Plan)",
             [
                 ("Claim type", routing.get("claim_type")),
-                ("Sources queried", ", ".join(str(s) for s in sources) if sources else "none"),
+                (
+                    "Sources queried",
+                    ", ".join(str(s) for s in sources) if sources else "none",
+                ),
                 ("Backup source", fallback),
-                ("Deep research sources", ", ".join(str(s) for s in deep) if deep else "none"),
+                (
+                    "Deep research sources",
+                    ", ".join(str(s) for s in deep) if deep else "none",
+                ),
             ],
         )
 
@@ -351,7 +395,11 @@ def _render_run_details(ui: TerminalUI, run: dict[str, Any]) -> None:
         for output in source_outputs:
             if not isinstance(output, dict):
                 continue
-            analysis = output.get("analysis") if isinstance(output.get("analysis"), dict) else {}
+            analysis = (
+                output.get("analysis")
+                if isinstance(output.get("analysis"), dict)
+                else {}
+            )
             mode_bits = []
             if analysis.get("break_search_mode"):
                 mode_bits.append(f"break={analysis.get('break_search_mode')}")
@@ -366,7 +414,9 @@ def _render_run_details(ui: TerminalUI, run: dict[str, Any]) -> None:
                     " | ".join(
                         bit
                         for bit in [
-                            ", ".join(str(err) for err in (output.get("errors") or [])[:1]),
+                            ", ".join(
+                                str(err) for err in (output.get("errors") or [])[:1]
+                            ),
                             ", ".join(mode_bits),
                         ]
                         if bit
@@ -381,16 +431,22 @@ def _render_run_details(ui: TerminalUI, run: dict[str, Any]) -> None:
             )
 
     analysis = run.get("analysis") if isinstance(run.get("analysis"), dict) else {}
-    claim_value_check = analysis.get("claim_value_check") if isinstance(
-        analysis.get("claim_value_check"), dict
-    ) else {}
-    structural_break = analysis.get("structural_break_detected") if isinstance(
-        analysis.get("structural_break_detected"), dict
-    ) else {}
+    claim_value_check = (
+        analysis.get("claim_value_check")
+        if isinstance(analysis.get("claim_value_check"), dict)
+        else {}
+    )
+    structural_break = (
+        analysis.get("structural_break_detected")
+        if isinstance(analysis.get("structural_break_detected"), dict)
+        else {}
+    )
 
     fallback_used = analysis.get("fallback_used", run.get("fallback_used"))
     deep_used = analysis.get("deep_research_used", run.get("deep_research_used"))
-    agg_conf = analysis.get("evidence_aggregate_confidence", run.get("aggregate_confidence", 0.0))
+    agg_conf = analysis.get(
+        "evidence_aggregate_confidence", run.get("aggregate_confidence", 0.0)
+    )
     within_tol = claim_value_check.get("within_tolerance")
     delta = claim_value_check.get("delta")
     struct_break = structural_break.get("detected")
@@ -399,14 +455,21 @@ def _render_run_details(ui: TerminalUI, run: dict[str, Any]) -> None:
     signal_rows: list[tuple[str, Any]] = [
         ("Used backup sources", "Yes" if fallback_used else "No"),
         ("Used deep research", "Yes" if deep_used else "No"),
-        ("Overall evidence confidence", f"{float(agg_conf):.1%}" if agg_conf else "n/a"),
+        (
+            "Overall evidence confidence",
+            f"{float(agg_conf):.1%}" if agg_conf else "n/a",
+        ),
     ]
     if within_tol is not None:
-        signal_rows.append(("Claimed value matches data", "Yes" if within_tol else "No"))
+        signal_rows.append(
+            ("Claimed value matches data", "Yes" if within_tol else "No")
+        )
     if delta is not None:
         signal_rows.append(("Difference from actual", str(delta)))
     if struct_break is not None:
-        signal_rows.append(("Statistical break detected", "Yes" if struct_break else "No"))
+        signal_rows.append(
+            ("Statistical break detected", "Yes" if struct_break else "No")
+        )
     if budget_skips:
         signal_rows.append(("Sources skipped (budget limit)", str(budget_skips)))
 
@@ -446,7 +509,9 @@ def _render_evidence_doc(ui: TerminalUI, run: dict[str, Any], index: int) -> Non
         ui.warning("No evidence documents available. Run a claim first.")
         return
     if index < 1 or index > len(docs):
-        ui.warning(f"Document #{index} doesn't exist. Choose a number between 1 and {len(docs)}.")
+        ui.warning(
+            f"Document #{index} doesn't exist. Choose a number between 1 and {len(docs)}."
+        )
         return
     doc = docs[index - 1]
     if not isinstance(doc, dict):
@@ -493,7 +558,9 @@ def _render_trace(ui: TerminalUI, trace: list[dict[str, Any]]) -> None:
             ]
         )
     if rows:
-        ui.table("Agent Communication Log", ["Time", "From", "To", "Type", "Content"], rows)
+        ui.table(
+            "Agent Communication Log", ["Time", "From", "To", "Type", "Content"], rows
+        )
         ui.hint("This shows how the AI agents coordinated to analyze your claim.")
     else:
         ui.warning("No trace captured yet. Run a claim first.")
@@ -525,7 +592,10 @@ def _render_retrieval_stats(ui: TerminalUI, stats: dict[str, Any]) -> None:
             ("Cached results reused", summary.get("cache_hits", 0)),
             ("Cache hit rate", f"{summary.get('cache_hit_rate', 0.0):.1%}"),
             ("Distinct data sources", summary.get("distinct_sources", 0)),
-            ("Average confidence", f"{summary.get('avg_aggregate_confidence', 0.0):.0%}"),
+            (
+                "Average confidence",
+                f"{summary.get('avg_aggregate_confidence', 0.0):.0%}",
+            ),
             ("Sources skipped (budget)", summary.get("provider_budget_skips", 0)),
         ],
     )
@@ -541,7 +611,11 @@ def _render_retrieval_stats(ui: TerminalUI, stats: dict[str, Any]) -> None:
             ]
             for row in source_rows[:12]
         ]
-        ui.table("Results By Source", ["Source", "Documents", "Cached", "Avg Confidence"], rows)
+        ui.table(
+            "Results By Source",
+            ["Source", "Documents", "Cached", "Avg Confidence"],
+            rows,
+        )
 
     recent_runs = stats.get("recent_runs") or []
     if recent_runs:
@@ -560,7 +634,16 @@ def _render_retrieval_stats(ui: TerminalUI, stats: dict[str, Any]) -> None:
         ]
         ui.table(
             "Recent Analyses",
-            ["ID", "Dataset", "Indicator", "Status", "Evidence", "Backup Used", "Deep", "Confidence"],
+            [
+                "ID",
+                "Dataset",
+                "Indicator",
+                "Status",
+                "Evidence",
+                "Backup Used",
+                "Deep",
+                "Confidence",
+            ],
             rows,
         )
 
@@ -650,7 +733,9 @@ def _error_detail(response: httpx.Response) -> str:
     return (response.text or "").strip()[:220]
 
 
-def _llm_guidance_from_error(status: int | None, detail: str, *, kind: str) -> list[str]:
+def _llm_guidance_from_error(
+    status: int | None, detail: str, *, kind: str
+) -> list[str]:
     lowered = detail.lower()
     hints: list[str] = []
 
@@ -660,11 +745,17 @@ def _llm_guidance_from_error(status: int | None, detail: str, *, kind: str) -> l
         )
     if "model" in lowered and "required" in lowered:
         if kind == "chat":
-            hints.append("Set ALETHEIA_LLM_MODEL or pass --llm-model for endpoints that require explicit model IDs.")
+            hints.append(
+                "Set ALETHEIA_LLM_MODEL or pass --llm-model for endpoints that require explicit model IDs."
+            )
         else:
-            hints.append("Set ALETHEIA_EMBED_MODEL or pass --embed-model for endpoints that require explicit model IDs.")
+            hints.append(
+                "Set ALETHEIA_EMBED_MODEL or pass --embed-model for endpoints that require explicit model IDs."
+            )
     if "connection refused" in lowered or "name or service not known" in lowered:
-        hints.append("Verify endpoint host/port and that the model runtime is listening on that interface.")
+        hints.append(
+            "Verify endpoint host/port and that the model runtime is listening on that interface."
+        )
 
     if kind == "embeddings" and status == 501:
         hints.append(
@@ -705,7 +796,9 @@ async def _probe_openai_health(
             payload["models_ok"] = 200 <= models_resp.status_code < 300
             if payload["models_ok"]:
                 models_payload = models_resp.json()
-                if isinstance(models_payload, dict) and isinstance(models_payload.get("data"), list):
+                if isinstance(models_payload, dict) and isinstance(
+                    models_payload.get("data"), list
+                ):
                     payload["models"] = [
                         str(row.get("id"))
                         for row in models_payload["data"]
@@ -714,7 +807,9 @@ async def _probe_openai_health(
             else:
                 detail = _error_detail(models_resp)
                 payload["errors"].append(f"models:{models_resp.status_code} {detail}")
-                payload["hints"].extend(_llm_guidance_from_error(models_resp.status_code, detail, kind=mode))
+                payload["hints"].extend(
+                    _llm_guidance_from_error(models_resp.status_code, detail, kind=mode)
+                )
 
             known_models = payload["models"]
             if known_models:
@@ -758,7 +853,9 @@ async def _probe_openai_health(
             if not payload["request_ok"]:
                 detail = _error_detail(call_resp)
                 payload["errors"].append(f"{mode}:{call_resp.status_code} {detail}")
-                payload["hints"].extend(_llm_guidance_from_error(call_resp.status_code, detail, kind=mode))
+                payload["hints"].extend(
+                    _llm_guidance_from_error(call_resp.status_code, detail, kind=mode)
+                )
                 if mode == "embeddings" and call_resp.status_code == 501:
                     payload["unsupported"] = True
     except Exception as exc:  # noqa: BLE001
@@ -800,7 +897,9 @@ async def _check_llm_health() -> dict[str, Any]:
     return {
         "chat": chat_result,
         "embeddings": embed_result,
-        "chat_ok": bool(chat_result.get("request_ok") and chat_result.get("model_ready")),
+        "chat_ok": bool(
+            chat_result.get("request_ok") and chat_result.get("model_ready")
+        ),
         "embeddings_ok": bool(
             embed_result.get("request_ok") and embed_result.get("model_ready")
         ),
@@ -843,12 +942,12 @@ async def interactive_mode(ui: TerminalUI):
         (
             "Enter a policy claim and Aletheia will check it against official data,\n"
             "detect methodology changes, and tell you how trustworthy the numbers are.\n\n"
-            "  Example: \"The US poverty rate increased by 3% in 2020\"\n\n"
+            '  Example: "The US poverty rate increased by 3% in 2020"\n\n'
             "Type [bold]help[/bold] for commands, or just type a claim to get started."
-            if ui._enabled else
-            "Enter a policy claim and Aletheia will check it against official data,\n"
+            if ui._enabled
+            else "Enter a policy claim and Aletheia will check it against official data,\n"
             "detect methodology changes, and tell you how trustworthy the numbers are.\n\n"
-            "  Example: \"The US poverty rate increased by 3% in 2020\"\n\n"
+            '  Example: "The US poverty rate increased by 3% in 2020"\n\n'
             "Type 'help' for commands, or just type a claim to get started."
         ),
     )
@@ -912,14 +1011,24 @@ async def interactive_mode(ui: TerminalUI):
                         content = str(block.get("text") or "").strip()
                         if content:
                             agent = str(block.get("agent") or "LLM")
-                            ui.thinking_block(content, collapsed_label=f"{agent} Reasoning")
+                            ui.thinking_block(
+                                content, collapsed_label=f"{agent} Reasoning"
+                            )
                 continue
             if claim.lower() == "!mode":
                 ui.kv_table(
                     "Current Settings",
                     [
-                        ("Deep research", "Always on" if persistent_deep else "Auto (normal)"),
-                        ("Last claim", last_claim[:60] + "..." if last_claim and len(last_claim) > 60 else (last_claim or "none")),
+                        (
+                            "Deep research",
+                            "Always on" if persistent_deep else "Auto (normal)",
+                        ),
+                        (
+                            "Last claim",
+                            last_claim[:60] + "..."
+                            if last_claim and len(last_claim) > 60
+                            else (last_claim or "none"),
+                        ),
                     ],
                 )
                 continue
@@ -972,6 +1081,7 @@ async def single_claim(
     *,
     show_json: bool = False,
     show_trace: bool = False,
+    case_id: str | None = None,
 ) -> None:
     """Process a single claim and exit."""
     orchestrator = OrchestratorAgent()
@@ -982,6 +1092,7 @@ async def single_claim(
             verdict = await orchestrator.process_claim(
                 claim,
                 progress_callback=spinner.update,
+                case_id=case_id,
             )
         finally:
             spinner.stop()
@@ -999,7 +1110,10 @@ async def single_claim(
                         continue
                     text = str(block.get("text") or "").strip()
                     if text:
-                        ui.thinking_block(text, collapsed_label=f"{block.get('agent', 'LLM')} Reasoning")
+                        ui.thinking_block(
+                            text,
+                            collapsed_label=f"{block.get('agent', 'LLM')} Reasoning",
+                        )
 
         if show_json:
             print(verdict.model_dump_json(indent=2))
@@ -1031,7 +1145,9 @@ async def _safe_db_check(timeout_seconds: float = 12.0) -> dict[str, Any]:
         }
 
 
-def _render_profile_context(ui: TerminalUI, resolved_profile: ResolvedRuntimeProfile | None) -> None:
+def _render_profile_context(
+    ui: TerminalUI, resolved_profile: ResolvedRuntimeProfile | None
+) -> None:
     if resolved_profile is None:
         return
     ui.kv_table(
@@ -1054,15 +1170,33 @@ def _render_profile_context(ui: TerminalUI, resolved_profile: ResolvedRuntimePro
 
 def _optional_key_status() -> list[tuple[str, bool, str]]:
     return [
-        ("BRAVE_SEARCH_API_KEY", bool(os.environ.get("BRAVE_SEARCH_API_KEY")), "Improves web fallback coverage."),
-        ("FRED_API_KEY", bool(os.environ.get("FRED_API_KEY")), "Enables macroeconomic data enrichment."),
-        ("CENSUS_API_KEY", bool(os.environ.get("CENSUS_API_KEY")), "Enables Census API enrichment."),
+        (
+            "BRAVE_SEARCH_API_KEY",
+            bool(os.environ.get("BRAVE_SEARCH_API_KEY")),
+            "Improves web fallback coverage.",
+        ),
+        (
+            "FRED_API_KEY",
+            bool(os.environ.get("FRED_API_KEY")),
+            "Enables macroeconomic data enrichment.",
+        ),
+        (
+            "CENSUS_API_KEY",
+            bool(os.environ.get("CENSUS_API_KEY")),
+            "Enables Census API enrichment.",
+        ),
         (
             "GOOGLE_CSE_API_KEY + GOOGLE_CSE_CX",
-            bool(os.environ.get("GOOGLE_CSE_API_KEY") and os.environ.get("GOOGLE_CSE_CX")),
+            bool(
+                os.environ.get("GOOGLE_CSE_API_KEY") and os.environ.get("GOOGLE_CSE_CX")
+            ),
             "Optional Google web retrieval provider.",
         ),
-        ("SERPAPI_API_KEY", bool(os.environ.get("SERPAPI_API_KEY")), "Optional scholar deep-research provider."),
+        (
+            "SERPAPI_API_KEY",
+            bool(os.environ.get("SERPAPI_API_KEY")),
+            "Optional scholar deep-research provider.",
+        ),
     ]
 
 
@@ -1086,9 +1220,16 @@ async def show_db_doctor(
 
         if ui._enabled and ui.console:
             from rich.panel import Panel as RichPanel
+
             body = "\n".join(status_lines)
-            ui.console.print(RichPanel(body, title="[bold]Database Health[/bold]",
-                                       border_style="green", padding=(1, 2)))
+            ui.console.print(
+                RichPanel(
+                    body,
+                    title="[bold]Database Health[/bold]",
+                    border_style="green",
+                    padding=(1, 2),
+                )
+            )
         else:
             print("\n--- Database Health ---")
             for line in status_lines:
@@ -1135,11 +1276,17 @@ async def show_onboarding(
     db_ok = bool(db_result.get("ok"))
     chat_ok = bool(llm_result.get("chat_ok"))
     embed_ok = bool(llm_result.get("embeddings_ok"))
-    counts = db_result.get("counts") if isinstance(db_result.get("counts"), dict) else {}
+    counts = (
+        db_result.get("counts") if isinstance(db_result.get("counts"), dict) else {}
+    )
     semantic_ok = bool(db_result.get("semantic_search_ready")) if db_ok else False
-    chat_diag = llm_result.get("chat") if isinstance(llm_result.get("chat"), dict) else {}
+    chat_diag = (
+        llm_result.get("chat") if isinstance(llm_result.get("chat"), dict) else {}
+    )
     embed_diag = (
-        llm_result.get("embeddings") if isinstance(llm_result.get("embeddings"), dict) else {}
+        llm_result.get("embeddings")
+        if isinstance(llm_result.get("embeddings"), dict)
+        else {}
     )
     all_ok = db_ok and chat_ok and embed_ok and semantic_ok
 
@@ -1156,26 +1303,43 @@ async def show_onboarding(
         ui.status_dot(db_ok, "Database", db_result.get("db_url_redacted", "")),
         ui.status_dot(chat_ok, "AI Chat Model", chat_diag.get("endpoint", "")),
         ui.status_dot(embed_ok, "Embedding Model", embed_diag.get("endpoint", "")),
-        ui.status_dot(semantic_ok, "Knowledge Search",
-                      "ready" if semantic_ok else "needs embedding setup"),
+        ui.status_dot(
+            semantic_ok,
+            "Knowledge Search",
+            "ready" if semantic_ok else "needs embedding setup",
+        ),
     ]
 
     if ui._enabled and ui.console:
         from rich.panel import Panel as RichPanel
-        overall = "[bold green]All systems ready[/bold green]" if all_ok else "[bold yellow]Some components need attention[/bold yellow]"
+
+        overall = (
+            "[bold green]All systems ready[/bold green]"
+            if all_ok
+            else "[bold yellow]Some components need attention[/bold yellow]"
+        )
         body = "\n".join(status_lines) + f"\n\n{overall}"
-        ui.console.print(RichPanel(body, title="[bold]System Status[/bold]",
-                                   border_style="green" if all_ok else "yellow",
-                                   padding=(1, 2)))
+        ui.console.print(
+            RichPanel(
+                body,
+                title="[bold]System Status[/bold]",
+                border_style="green" if all_ok else "yellow",
+                padding=(1, 2),
+            )
+        )
     else:
         print("\n--- System Status ---")
         for line in status_lines:
             print(f"  {line}")
-        print(f"\n  {'All systems ready' if all_ok else 'Some components need attention'}")
+        print(
+            f"\n  {'All systems ready' if all_ok else 'Some components need attention'}"
+        )
         print("---")
 
     # -- Section 2: Knowledge Base (when DB is connected) ------------------
-    counts = db_result.get("counts") if isinstance(db_result.get("counts"), dict) else {}
+    counts = (
+        db_result.get("counts") if isinstance(db_result.get("counts"), dict) else {}
+    )
     if db_ok and counts:
         ui.kv_table(
             "Knowledge Base",
@@ -1188,9 +1352,15 @@ async def show_onboarding(
         )
 
     # -- Section 3: Diagnostics (only when something is wrong) -------------
-    _render_onboarding_diagnostics(ui, chat_ok=chat_ok, embed_ok=embed_ok, db_ok=db_ok,
-                                   chat_diag=chat_diag, embed_diag=embed_diag,
-                                   db_result=db_result)
+    _render_onboarding_diagnostics(
+        ui,
+        chat_ok=chat_ok,
+        embed_ok=embed_ok,
+        db_ok=db_ok,
+        chat_diag=chat_diag,
+        embed_diag=embed_diag,
+        db_result=db_result,
+    )
 
     # -- Section 4: Optional Enhancements ----------------------------------
     key_rows = _optional_key_status()
@@ -1204,18 +1374,24 @@ async def show_onboarding(
         "SERPAPI_API_KEY": "Scholar Deep Research",
     }
     opt_rows = [
-        [_FRIENDLY_KEY_NAMES.get(name, name),
-         "Active" if ready else "Not configured",
-         note]
+        [
+            _FRIENDLY_KEY_NAMES.get(name, name),
+            "Active" if ready else "Not configured",
+            note,
+        ]
         for name, ready, note in key_rows
     ]
-    ui.table("Optional Data Sources (not required)", ["Feature", "Status", "What It Adds"], opt_rows)
+    ui.table(
+        "Optional Data Sources (not required)",
+        ["Feature", "Status", "What It Adds"],
+        opt_rows,
+    )
 
     # -- Section 5: What To Do Next ----------------------------------------
     if all_ok:
         next_steps = [
             "You're all set! Try analyzing a claim:",
-            "  uv run aletheia claim \"The US poverty rate increased by 3% in 2020\"",
+            '  uv run aletheia claim "The US poverty rate increased by 3% in 2020"',
             "Or start an interactive session:",
             "  uv run aletheia interactive",
         ]
@@ -1228,7 +1404,9 @@ async def show_onboarding(
             next_steps.append("Start your AI model server (LM Studio or Ollama)")
             next_steps.append("Load a chat model, then re-run this check")
         if not embed_ok:
-            next_steps.append("Load an embedding model (e.g., qwen3-embedding in Ollama)")
+            next_steps.append(
+                "Load an embedding model (e.g., qwen3-embedding in Ollama)"
+            )
         if db_ok and not semantic_ok:
             next_steps.append("Build the knowledge base:")
             next_steps.append("  uv run aletheia seed")
@@ -1239,8 +1417,14 @@ async def show_onboarding(
 
 
 def _render_onboarding_diagnostics(
-    ui: TerminalUI, *, chat_ok: bool, embed_ok: bool, db_ok: bool,
-    chat_diag: dict, embed_diag: dict, db_result: dict,
+    ui: TerminalUI,
+    *,
+    chat_ok: bool,
+    embed_ok: bool,
+    db_ok: bool,
+    chat_diag: dict,
+    embed_diag: dict,
+    db_result: dict,
 ) -> None:
     """Render diagnostic details only for components that need attention."""
     if chat_ok and embed_ok and db_ok:
@@ -1249,19 +1433,37 @@ def _render_onboarding_diagnostics(
     issues: list[str] = []
 
     if not chat_ok:
-        chat_errors = [str(e).strip() for e in (chat_diag.get("errors") or [])[:3] if str(e).strip()]
-        chat_hints = [str(h).strip() for h in (chat_diag.get("hints") or [])[:3] if str(h).strip()]
+        chat_errors = [
+            str(e).strip()
+            for e in (chat_diag.get("errors") or [])[:3]
+            if str(e).strip()
+        ]
+        chat_hints = [
+            str(h).strip() for h in (chat_diag.get("hints") or [])[:3] if str(h).strip()
+        ]
         if chat_errors:
             issues.append(f"AI Chat Model: {chat_errors[0]}")
         for h in chat_hints:
             issues.append(f"  Fix: {h}")
 
     if not embed_ok:
-        embed_errors = [str(e).strip() for e in (embed_diag.get("errors") or [])[:3] if str(e).strip()]
-        embed_hints = [str(h).strip() for h in (embed_diag.get("hints") or [])[:3] if str(h).strip()]
+        embed_errors = [
+            str(e).strip()
+            for e in (embed_diag.get("errors") or [])[:3]
+            if str(e).strip()
+        ]
+        embed_hints = [
+            str(h).strip()
+            for h in (embed_diag.get("hints") or [])[:3]
+            if str(h).strip()
+        ]
         if chat_ok and bool(embed_diag.get("unsupported")):
-            issues.append("Embedding Model: Chat works but this server doesn't support embeddings")
-            issues.append("  Fix: Point ALETHEIA_EMBED_BASE_URL to an embedding-capable server")
+            issues.append(
+                "Embedding Model: Chat works but this server doesn't support embeddings"
+            )
+            issues.append(
+                "  Fix: Point ALETHEIA_EMBED_BASE_URL to an embedding-capable server"
+            )
         elif embed_errors:
             issues.append(f"Embedding Model: {embed_errors[0]}")
         for h in embed_hints:
@@ -1290,19 +1492,25 @@ def _build_parser() -> argparse.ArgumentParser:
             default=None,
             help="Optional .env-style profile file layered over built-in profile defaults.",
         )
-        target.add_argument("--llm-base-url", default=None, help="Override ALETHEIA_LLM_BASE_URL.")
-        target.add_argument("--llm-model", default=None, help="Override ALETHEIA_LLM_MODEL.")
+        target.add_argument(
+            "--llm-base-url", default=None, help="Override ALETHEIA_LLM_BASE_URL."
+        )
+        target.add_argument(
+            "--llm-model", default=None, help="Override ALETHEIA_LLM_MODEL."
+        )
         target.add_argument(
             "--embed-base-url",
             default=None,
             help="Override ALETHEIA_EMBED_BASE_URL.",
         )
-        target.add_argument("--embed-model", default=None, help="Override ALETHEIA_EMBED_MODEL.")
+        target.add_argument(
+            "--embed-model", default=None, help="Override ALETHEIA_EMBED_MODEL."
+        )
         target.add_argument("--db-url", default=None, help="Override ALETHEIA_DB_URL.")
 
     parser = argparse.ArgumentParser(
         prog="aletheia",
-        description="ALETHEIA terminal interface.",
+        description="ALETHEIA case-centric investigation CLI.",
     )
     _add_runtime_args(parser)
     parser.add_argument(
@@ -1321,12 +1529,72 @@ def _build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
 
-    sub.add_parser("interactive", help="Start interactive claim analysis.", parents=[runtime_parent])
+    sub.add_parser(
+        "interactive",
+        help="Start interactive claim analysis.",
+        parents=[runtime_parent],
+    )
 
-    claim = sub.add_parser("claim", help="Analyze one claim.", parents=[runtime_parent])
+    claim = sub.add_parser(
+        "claim",
+        help="Analyze one claim (optionally under a case).",
+        parents=[runtime_parent],
+    )
     claim.add_argument("text", nargs="+", help="Claim text.")
     claim.add_argument("--json", action="store_true", help="Print verdict JSON.")
     claim.add_argument("--trace", action="store_true", help="Print agent trace.")
+    claim.add_argument(
+        "--case",
+        dest="case_id",
+        default=None,
+        help="Case ID to attach this session to (case:<id> or <id>).",
+    )
+
+    case_parser = sub.add_parser(
+        "case",
+        help="Create, inspect, and export investigation cases.",
+        description=(
+            "Case-centric workflow: create a case, run claim/batch with --case, "
+            "then review history/export."
+        ),
+        parents=[runtime_parent],
+    )
+    case_sub = case_parser.add_subparsers(dest="case_action")
+    case_create = case_sub.add_parser("create", help="Create a new investigation case.")
+    case_create.add_argument("name", help="Case name.")
+    case_create.add_argument(
+        "--description", default=None, help="Optional case description."
+    )
+    case_list = case_sub.add_parser("list", help="List recent cases.")
+    case_list.add_argument(
+        "--limit", type=int, default=20, help="Maximum cases to show."
+    )
+    case_show = case_sub.add_parser("show", help="Show case details.")
+    case_show.add_argument("case_id", help="Case ID (case:<id> or <id>).")
+    case_history = case_sub.add_parser("history", help="Show case activity timeline.")
+    case_history.add_argument("case_id", help="Case ID (case:<id> or <id>).")
+    case_history.add_argument(
+        "--limit", type=int, default=20, help="Max activity rows to show."
+    )
+    case_history.add_argument(
+        "--json", action="store_true", help="Print structured JSON output."
+    )
+    case_export = case_sub.add_parser("export", help="Export case data.")
+    case_export.add_argument("case_id", help="Case ID (case:<id> or <id>).")
+    case_export.add_argument(
+        "--format",
+        choices=["json", "jsonl", "md"],
+        default="json",
+        help="Export format (default: json).",
+    )
+    case_export.add_argument(
+        "--output", default=None, help="Write export to file path."
+    )
+    case_reconcile = case_sub.add_parser(
+        "reconcile",
+        help="Repair missing case graph links from case_id fields.",
+    )
+    case_reconcile.add_argument("case_id", help="Case ID (case:<id> or <id>).")
 
     stats = sub.add_parser(
         "retrieval-stats",
@@ -1341,8 +1609,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Diagnose DB connectivity and extension readiness.",
         parents=[runtime_parent],
     )
-    sub.add_parser("capabilities", help="Show capability matrix.", parents=[runtime_parent])
-    sub.add_parser("onboarding", help="Run local-first setup checks.", parents=[runtime_parent])
+    sub.add_parser(
+        "capabilities", help="Show capability matrix.", parents=[runtime_parent]
+    )
+    sub.add_parser(
+        "onboarding", help="Run local-first setup checks.", parents=[runtime_parent]
+    )
 
     seed_parser = sub.add_parser(
         "seed",
@@ -1376,9 +1648,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ingest_sub = ingest_parser.add_subparsers(dest="ingest_action")
     ingest_url = ingest_sub.add_parser("url", help="Ingest a single URL (HTML or PDF).")
     ingest_url.add_argument("target", help="URL to fetch and ingest.")
-    ingest_dir = ingest_sub.add_parser("dir", help="Ingest all files from a local directory.")
+    ingest_dir = ingest_sub.add_parser(
+        "dir", help="Ingest all files from a local directory."
+    )
     ingest_dir.add_argument("path", help="Directory path to scan.")
-    ingest_sub.add_parser("marina", help="Parse MARINA.md knowledge lists and index summaries.")
+    ingest_sub.add_parser(
+        "marina", help="Parse MARINA.md knowledge lists and index summaries."
+    )
 
     # Model management
     models_parser = sub.add_parser(
@@ -1402,7 +1678,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Batch evaluation
     batch_parser = sub.add_parser(
         "batch",
-        help="Run batch evaluation on multiple claims.",
+        help="Run case-linked batch analysis on multiple claims.",
         parents=[runtime_parent],
     )
     batch_parser.add_argument(
@@ -1420,6 +1696,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to write JSON results (default: stdout).",
     )
+    batch_parser.add_argument(
+        "--case",
+        dest="case_id",
+        default=None,
+        help="Case ID to attach this batch to (case:<id> or <id>).",
+    )
 
     # Graph queries
     graph_parser = sub.add_parser(
@@ -1432,12 +1714,51 @@ def _build_parser() -> argparse.ArgumentParser:
         "provenance",
         help="Show full evidence chain for a session.",
     )
-    graph_prov.add_argument("session_id", help="Session record ID (e.g. session:abc123).")
+    graph_prov.add_argument(
+        "session_id", help="Session record ID (e.g. session:abc123)."
+    )
     graph_impacts = graph_sub.add_parser(
         "impacts",
         help="Show indicators affected by a methodology change.",
     )
-    graph_impacts.add_argument("change_id", help="Change record ID (e.g. methodology_change:ph3_001).")
+    graph_impacts.add_argument(
+        "change_id", help="Change record ID (e.g. methodology_change:ph3_001)."
+    )
+    graph_timeline = graph_sub.add_parser(
+        "timeline",
+        help="Show methodology timeline for a dataset.",
+    )
+    graph_timeline.add_argument(
+        "dataset_code", help="Dataset code (e.g. CPS, EU-LFS, ACS)."
+    )
+    graph_recall = graph_sub.add_parser(
+        "recall",
+        help="Recall prior similar verification sessions.",
+    )
+    graph_recall.add_argument(
+        "--session",
+        dest="session_id",
+        default=None,
+        help="Source session ID to derive dataset/indicator context.",
+    )
+    graph_recall.add_argument(
+        "--dataset",
+        dest="dataset_code",
+        default=None,
+        help="Dataset code to match prior sessions.",
+    )
+    graph_recall.add_argument(
+        "--indicator",
+        dest="indicator",
+        default=None,
+        help="Indicator text to match prior sessions.",
+    )
+    graph_recall.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Maximum similar sessions to return.",
+    )
 
     # Endpoint management
     endpoints_parser = sub.add_parser(
@@ -1447,7 +1768,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     endpoints_sub = endpoints_parser.add_subparsers(dest="endpoints_action")
     endpoints_sub.add_parser("list", help="List configured endpoints (default).")
-    endpoints_probe = endpoints_sub.add_parser("probe", help="Probe a URL to detect provider type.")
+    endpoints_probe = endpoints_sub.add_parser(
+        "probe", help="Probe a URL to detect provider type."
+    )
     endpoints_probe.add_argument("url", help="Endpoint URL to probe.")
 
     return parser
@@ -1460,6 +1783,7 @@ def _normalize_argv(argv: list[str]) -> list[str]:
     known = {
         "interactive",
         "claim",
+        "case",
         "retrieval-stats",
         "db-doctor",
         "capabilities",
@@ -1491,7 +1815,304 @@ def _humanize_size(size_bytes: int | None) -> str:
     return f"{size_bytes:.1f} PB"
 
 
-async def show_models(ui: TerminalUI, action: str | None, args: argparse.Namespace) -> int:
+def _normalize_case_id(case_id: str | None) -> str | None:
+    if not case_id:
+        return None
+    value = case_id.strip()
+    if not value:
+        return None
+    if value.startswith("case:"):
+        return value
+    return f"case:{value}"
+
+
+def _query_result_rows(result: Any) -> list[dict[str, Any]]:
+    if not result:
+        return []
+    if isinstance(result, list):
+        for item in result:
+            if isinstance(item, dict):
+                rows = item.get("result", [])
+                if isinstance(rows, list):
+                    return rows
+            elif isinstance(item, list):
+                return item
+        if all(isinstance(r, dict) for r in result):
+            return result
+    return []
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _claim_snippet(value: Any, *, width: int = 80) -> str:
+    text = str(value or "").strip().replace("\n", " ")
+    if len(text) <= width:
+        return text
+    return text[: width - 3] + "..."
+
+
+def _batch_summary_text(batch_row: dict[str, Any]) -> str:
+    results = batch_row.get("results")
+    if not isinstance(results, dict):
+        return ""
+    succeeded = results.get("succeeded")
+    failed = results.get("failed")
+    avg_conf = _safe_float(results.get("avg_confidence"))
+    parts: list[str] = []
+    if isinstance(succeeded, int):
+        parts.append(f"ok={succeeded}")
+    if isinstance(failed, int):
+        parts.append(f"fail={failed}")
+    if avg_conf is not None:
+        parts.append(f"avg={avg_conf:.2f}")
+    return " ".join(parts)
+
+
+async def _load_case_bundle(
+    case_id: str,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[dict[str, Any]]]:
+    from aletheia.db import get_connection
+
+    async with get_connection() as db:
+        case_result = await db.query("SELECT * FROM $case LIMIT 1", {"case": case_id})
+        case_rows = _query_result_rows(case_result)
+        if not case_rows:
+            return None, [], []
+
+        sessions_result = await db.query(
+            """
+            SELECT id, case_id, claim_text, status, started_at, completed_at, verdict, metadata, error_text
+            FROM $case->has_session->session
+            ORDER BY started_at ASC
+            """,
+            {"case": case_id},
+        )
+        batches_result = await db.query(
+            """
+            SELECT id, case_id, name, status, total_claims, completed_claims, started_at, completed_at, results
+            FROM $case->has_batch->batch
+            ORDER BY started_at ASC
+            """,
+            {"case": case_id},
+        )
+        return (
+            case_rows[0],
+            _query_result_rows(sessions_result),
+            _query_result_rows(batches_result),
+        )
+
+
+async def _case_exists(case_id: str) -> bool:
+    from aletheia.db import get_connection
+
+    async with get_connection() as db:
+        case_result = await db.query("SELECT id FROM $case LIMIT 1", {"case": case_id})
+        return bool(_query_result_rows(case_result))
+
+
+async def _reconcile_case_links(case_id: str) -> dict[str, int]:
+    from aletheia.db import get_connection
+
+    async with get_connection() as db:
+        sessions_by_case = await db.query(
+            """
+            SELECT id
+            FROM session
+            WHERE case_id = $case
+            """,
+            {"case": case_id},
+        )
+        linked_sessions = await db.query(
+            """
+            SELECT id
+            FROM $case->has_session->session
+            """,
+            {"case": case_id},
+        )
+        session_ids = {
+            str(row.get("id")) for row in _query_result_rows(sessions_by_case)
+        }
+        linked_session_ids = {
+            str(row.get("id")) for row in _query_result_rows(linked_sessions)
+        }
+        linked_session_count = 0
+        for session_id in sorted(session_ids - linked_session_ids):
+            await db.query(
+                "RELATE $case->has_session->$session",
+                {"case": case_id, "session": session_id},
+            )
+            linked_session_count += 1
+
+        batches_by_case = await db.query(
+            """
+            SELECT id
+            FROM batch
+            WHERE case_id = $case
+            """,
+            {"case": case_id},
+        )
+        linked_batches = await db.query(
+            """
+            SELECT id
+            FROM $case->has_batch->batch
+            """,
+            {"case": case_id},
+        )
+        batch_ids = {str(row.get("id")) for row in _query_result_rows(batches_by_case)}
+        linked_batch_ids = {
+            str(row.get("id")) for row in _query_result_rows(linked_batches)
+        }
+        linked_batch_count = 0
+        for batch_id in sorted(batch_ids - linked_batch_ids):
+            await db.query(
+                "RELATE $case->has_batch->$batch",
+                {"case": case_id, "batch": batch_id},
+            )
+            linked_batch_count += 1
+
+        return {
+            "linked_sessions": linked_session_count,
+            "linked_batches": linked_batch_count,
+        }
+
+
+def _build_case_rollup(
+    sessions: list[dict[str, Any]], batches: list[dict[str, Any]]
+) -> dict[str, int]:
+    return {
+        "total_sessions": len(sessions),
+        "completed_sessions": sum(
+            1 for row in sessions if row.get("status") == "completed"
+        ),
+        "failed_sessions": sum(
+            1 for row in sessions if row.get("status") in {"failed", "error"}
+        ),
+        "total_batches": len(batches),
+        "completed_batches": sum(
+            1 for row in batches if row.get("status") == "completed"
+        ),
+        "failed_batches": sum(
+            1 for row in batches if row.get("status") in {"failed", "error"}
+        ),
+    }
+
+
+def _build_case_history_payload(
+    case_row: dict[str, Any],
+    sessions: list[dict[str, Any]],
+    batches: list[dict[str, Any]],
+    *,
+    limit: int,
+) -> dict[str, Any]:
+    rollup = _build_case_rollup(sessions, batches)
+    activity: list[dict[str, Any]] = []
+    for row in sessions:
+        confidence = None
+        metadata = row.get("metadata")
+        if isinstance(metadata, dict):
+            confidence = _safe_float(metadata.get("aggregate_confidence"))
+        if confidence is None and isinstance(row.get("verdict"), dict):
+            confidence = _safe_float(row["verdict"].get("confidence"))
+        activity.append(
+            {
+                "type": "session",
+                "id": row.get("id"),
+                "status": row.get("status"),
+                "claim": row.get("claim_text"),
+                "claim_snippet": _claim_snippet(row.get("claim_text")),
+                "started_at": row.get("started_at"),
+                "completed_at": row.get("completed_at"),
+                "confidence": confidence,
+            }
+        )
+    for row in batches:
+        activity.append(
+            {
+                "type": "batch",
+                "id": row.get("id"),
+                "status": row.get("status"),
+                "name": row.get("name"),
+                "total_claims": row.get("total_claims"),
+                "completed_claims": row.get("completed_claims"),
+                "started_at": row.get("started_at"),
+                "completed_at": row.get("completed_at"),
+                "summary": _batch_summary_text(row),
+            }
+        )
+
+    activity.sort(key=lambda row: str(row.get("started_at") or ""))
+    if limit > 0:
+        activity = activity[-limit:]
+
+    return {
+        "case": {
+            "id": case_row.get("id"),
+            "name": case_row.get("name"),
+            "status": case_row.get("status"),
+            "description": case_row.get("description"),
+            "created_at": case_row.get("created_at"),
+            "updated_at": case_row.get("updated_at"),
+        },
+        "rollup": rollup,
+        "activity": activity,
+    }
+
+
+def _render_case_export_markdown(payload: dict[str, Any]) -> str:
+    case_row = payload["case"]
+    sessions = payload["sessions"]
+    batches = payload["batches"]
+    rollup = payload["rollup"]
+    lines = [
+        f"# Case Report: {case_row.get('name') or case_row.get('id')}",
+        "",
+        "## Case Metadata",
+        f"- ID: {case_row.get('id')}",
+        f"- Status: {case_row.get('status')}",
+        f"- Created: {case_row.get('created_at')}",
+        f"- Updated: {case_row.get('updated_at')}",
+        f"- Description: {case_row.get('description') or ''}",
+        "",
+        "## Rollup",
+        f"- Sessions: {rollup['total_sessions']} (completed={rollup['completed_sessions']}, failed={rollup['failed_sessions']})",
+        f"- Batches: {rollup['total_batches']} (completed={rollup['completed_batches']}, failed={rollup['failed_batches']})",
+        "",
+        "## Sessions",
+    ]
+    if sessions:
+        for row in sessions:
+            claim = _claim_snippet(row.get("claim_text"), width=120)
+            lines.append(
+                f"- {row.get('id')} | {row.get('status')} | started={row.get('started_at')} | completed={row.get('completed_at')} | claim={claim}"
+            )
+    else:
+        lines.append("- No sessions linked to this case.")
+
+    lines.extend(["", "## Batches"])
+    if batches:
+        for row in batches:
+            lines.append(
+                f"- {row.get('id')} | {row.get('status')} | {row.get('completed_claims')}/{row.get('total_claims')} completed | started={row.get('started_at')} | completed={row.get('completed_at')}"
+            )
+            summary_text = _batch_summary_text(row)
+            if summary_text:
+                lines.append(f"  - summary: {summary_text}")
+    else:
+        lines.append("- No batches linked to this case.")
+
+    return "\n".join(lines) + "\n"
+
+
+async def show_models(
+    ui: TerminalUI, action: str | None, args: argparse.Namespace
+) -> int:
     """Model management commands."""
     from aletheia.providers import get_configured_endpoints, get_provider
 
@@ -1507,24 +2128,46 @@ async def show_models(ui: TerminalUI, action: str | None, args: argparse.Namespa
             try:
                 models = await provider.list_models()
                 for m in models:
-                    rows.append([
-                        m.name,
-                        _humanize_size(m.size_bytes),
-                        m.quantization or "—",
-                        m.parameter_count or "—",
-                        "yes" if m.loaded else "—",
-                        ", ".join(m.capabilities),
-                        m.provider,
-                        ep_name,
-                    ])
+                    rows.append(
+                        [
+                            m.name,
+                            _humanize_size(m.size_bytes),
+                            m.quantization or "—",
+                            m.parameter_count or "—",
+                            "yes" if m.loaded else "—",
+                            ", ".join(m.capabilities),
+                            m.provider,
+                            ep_name,
+                        ]
+                    )
             except Exception as exc:
-                rows.append([f"(error: {exc})", "—", "—", "—", "—", "—", ep.provider_type, ep_name])
+                rows.append(
+                    [
+                        f"(error: {exc})",
+                        "—",
+                        "—",
+                        "—",
+                        "—",
+                        "—",
+                        ep.provider_type,
+                        ep_name,
+                    ]
+                )
             finally:
                 await provider.close()
         if rows:
             ui.table(
                 "Models",
-                ["Name", "Size", "Quant", "Params", "Loaded", "Caps", "Provider", "Endpoint"],
+                [
+                    "Name",
+                    "Size",
+                    "Quant",
+                    "Params",
+                    "Loaded",
+                    "Caps",
+                    "Provider",
+                    "Endpoint",
+                ],
                 rows,
             )
         else:
@@ -1630,9 +2273,15 @@ async def show_models(ui: TerminalUI, action: str | None, args: argparse.Namespa
     return 2
 
 
-async def show_endpoints(ui: TerminalUI, action: str | None, args: argparse.Namespace) -> int:
+async def show_endpoints(
+    ui: TerminalUI, action: str | None, args: argparse.Namespace
+) -> int:
     """Endpoint management commands."""
-    from aletheia.providers import get_configured_endpoints, get_provider, probe_endpoint
+    from aletheia.providers import (
+        get_configured_endpoints,
+        get_provider,
+        probe_endpoint,
+    )
 
     if action == "probe":
         url = getattr(args, "url", None)
@@ -1652,10 +2301,17 @@ async def show_endpoints(ui: TerminalUI, action: str | None, args: argparse.Name
         models = result.get("models", [])
         if models:
             rows = [
-                [m["name"], m.get("family") or "—", m.get("parameter_count") or "—", ", ".join(m.get("capabilities", []))]
+                [
+                    m["name"],
+                    m.get("family") or "—",
+                    m.get("parameter_count") or "—",
+                    ", ".join(m.get("capabilities", [])),
+                ]
                 for m in models
             ]
-            ui.table("Available Models", ["Name", "Family", "Params", "Capabilities"], rows)
+            ui.table(
+                "Available Models", ["Name", "Family", "Params", "Capabilities"], rows
+            )
         return 0
 
     # Default: list endpoints with health
@@ -1668,23 +2324,38 @@ async def show_endpoints(ui: TerminalUI, action: str | None, args: argparse.Name
         provider = get_provider(ep)
         try:
             health = await provider.health_check()
-            rows.append([
-                ep_name,
-                ep.url,
-                ep.provider_type,
-                ", ".join(ep.roles),
-                "healthy" if health.get("ok") else "unreachable",
-                health.get("model_count", "—"),
-            ])
+            rows.append(
+                [
+                    ep_name,
+                    ep.url,
+                    ep.provider_type,
+                    ", ".join(ep.roles),
+                    "healthy" if health.get("ok") else "unreachable",
+                    health.get("model_count", "—"),
+                ]
+            )
         except Exception as exc:
-            rows.append([ep_name, ep.url, ep.provider_type, ", ".join(ep.roles), f"error: {exc}", "—"])
+            rows.append(
+                [
+                    ep_name,
+                    ep.url,
+                    ep.provider_type,
+                    ", ".join(ep.roles),
+                    f"error: {exc}",
+                    "—",
+                ]
+            )
         finally:
             await provider.close()
 
     if rows:
-        ui.table("Endpoints", ["Name", "URL", "Provider", "Roles", "Status", "Models"], rows)
+        ui.table(
+            "Endpoints", ["Name", "URL", "Provider", "Roles", "Status", "Models"], rows
+        )
     else:
-        ui.warning("No endpoints configured. Create aletheia.yaml or set ALETHEIA_LLM_BASE_URL.")
+        ui.warning(
+            "No endpoints configured. Create aletheia.yaml or set ALETHEIA_LLM_BASE_URL."
+        )
     return 0
 
 
@@ -1813,7 +2484,9 @@ def _run_ingest(ui: TerminalUI, args: argparse.Namespace) -> int:
         ui.info(f"Ingesting {label}...")
         stats = asyncio.run(ingest_marina_corpus(marina_path, dry_run=dry_run))
         if dry_run:
-            ui.success(f"Dry run: {stats['documents_seen']} documents would be ingested")
+            ui.success(
+                f"Dry run: {stats['documents_seen']} documents would be ingested"
+            )
         else:
             ui.success(
                 f"Done: {stats['documents_written']}/{stats['documents_seen']} documents, "
@@ -1834,13 +2507,317 @@ def _run_ingest(ui: TerminalUI, args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_case(ui: TerminalUI, args: argparse.Namespace) -> int:
+    """Dispatch case management subcommand."""
+    from aletheia.db import get_connection
+
+    action = getattr(args, "case_action", None)
+    if not action:
+        ui.error(
+            "Missing case action. Use: aletheia case {create,list,show,history,export,reconcile}"
+        )
+        return 2
+
+    if action == "create":
+        name = str(getattr(args, "name", "")).strip()
+        if not name:
+            ui.error("Case name cannot be empty.")
+            return 2
+        description = getattr(args, "description", None)
+
+        async def _create() -> dict[str, Any] | None:
+            async with get_connection() as db:
+                result = await db.query(
+                    """
+                    CREATE case SET
+                        name = $name,
+                        description = $description,
+                        status = 'active'
+                    """,
+                    {"name": name, "description": description},
+                )
+                rows = _query_result_rows(result)
+                return rows[0] if rows else None
+
+        created = asyncio.run(_create())
+        if not created:
+            ui.error("Failed to create case.")
+            return 2
+        case_id = str(created.get("id", ""))
+        ui.success(f"Case created: {case_id}")
+        ui.info(f"Use with claim/batch: --case {case_id}")
+        ui.info(f"Next: aletheia case history {case_id}")
+        return 0
+
+    if action == "list":
+        limit = max(1, int(getattr(args, "limit", 20)))
+
+        async def _list() -> list[dict[str, Any]]:
+            async with get_connection() as db:
+                result = await db.query(
+                    """
+                    SELECT id, name, status, created_at
+                    FROM case
+                    ORDER BY created_at DESC
+                    LIMIT $limit
+                    """,
+                    {"limit": limit},
+                )
+                return _query_result_rows(result)
+
+        rows = asyncio.run(_list())
+        if not rows:
+            ui.warning("No cases found.")
+            return 0
+        ui.table(
+            "Cases",
+            ["ID", "Name", "Status", "Created"],
+            [
+                [
+                    row.get("id"),
+                    row.get("name"),
+                    row.get("status"),
+                    row.get("created_at"),
+                ]
+                for row in rows
+            ],
+        )
+        return 0
+
+    if action == "show":
+        case_id = _normalize_case_id(getattr(args, "case_id", None))
+        if case_id is None:
+            ui.error("Case ID is required.")
+            return 2
+
+        async def _show() -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+            async with get_connection() as db:
+                case_result = await db.query(
+                    "SELECT * FROM $case LIMIT 1", {"case": case_id}
+                )
+                case_rows = _query_result_rows(case_result)
+                if not case_rows:
+                    return None, None
+                stats_result = await db.query(
+                    """
+                    SELECT
+                        count(->has_session) AS sessions,
+                        count(->has_batch) AS batches
+                    FROM $case
+                    GROUP ALL
+                    """,
+                    {"case": case_id},
+                )
+                stats_rows = _query_result_rows(stats_result)
+                return case_rows[0], (stats_rows[0] if stats_rows else None)
+
+        case_row, stats = asyncio.run(_show())
+        if case_row is None:
+            ui.error(f"Case not found: {case_id}")
+            return 2
+        ui.kv_table(
+            "Case",
+            [
+                ("id", case_row.get("id")),
+                ("name", case_row.get("name")),
+                ("status", case_row.get("status")),
+                ("description", case_row.get("description") or ""),
+                ("created_at", case_row.get("created_at")),
+                ("sessions", (stats or {}).get("sessions", 0)),
+                ("batches", (stats or {}).get("batches", 0)),
+            ],
+        )
+        return 0
+
+    if action == "reconcile":
+        case_id = _normalize_case_id(getattr(args, "case_id", None))
+        if case_id is None:
+            ui.error("Case ID is required.")
+            return 2
+        if not asyncio.run(_case_exists(case_id)):
+            ui.error(f"Case not found: {case_id}")
+            return 2
+        counts = asyncio.run(_reconcile_case_links(case_id))
+        ui.success(
+            "Case links reconciled: "
+            f"sessions={counts['linked_sessions']} batches={counts['linked_batches']}"
+        )
+        return 0
+
+    if action == "history":
+        case_id = _normalize_case_id(getattr(args, "case_id", None))
+        if case_id is None:
+            ui.error("Case ID is required.")
+            return 2
+        limit = max(1, int(getattr(args, "limit", 20)))
+
+        if not asyncio.run(_case_exists(case_id)):
+            ui.error(f"Case not found: {case_id}")
+            return 2
+
+        case_row, sessions, batches = asyncio.run(_load_case_bundle(case_id))
+        if case_row is None:
+            ui.error(f"Case loading failed: {case_id}")
+            return 2
+
+        payload = _build_case_history_payload(case_row, sessions, batches, limit=limit)
+        if bool(getattr(args, "json", False)):
+            print(json.dumps(payload, indent=2, default=str))
+            return 0
+
+        ui.kv_table(
+            "Case Rollup",
+            [
+                ("id", payload["case"]["id"]),
+                ("name", payload["case"]["name"]),
+                ("sessions", payload["rollup"]["total_sessions"]),
+                ("batches", payload["rollup"]["total_batches"]),
+                ("completed_sessions", payload["rollup"]["completed_sessions"]),
+                ("failed_sessions", payload["rollup"]["failed_sessions"]),
+                ("completed_batches", payload["rollup"]["completed_batches"]),
+                ("failed_batches", payload["rollup"]["failed_batches"]),
+            ],
+        )
+        if not payload["activity"]:
+            ui.warning("No case activity found.")
+            return 0
+
+        rows: list[list[Any]] = []
+        for row in payload["activity"]:
+            if row["type"] == "session":
+                confidence = row.get("confidence")
+                confidence_text = ""
+                if isinstance(confidence, float):
+                    confidence_text = f"{confidence:.2f}"
+                rows.append(
+                    [
+                        "session",
+                        row.get("id"),
+                        row.get("status"),
+                        row.get("claim_snippet"),
+                        row.get("started_at"),
+                        row.get("completed_at"),
+                        confidence_text,
+                    ]
+                )
+            else:
+                rows.append(
+                    [
+                        "batch",
+                        row.get("id"),
+                        row.get("status"),
+                        f"{row.get('completed_claims')}/{row.get('total_claims')} {_claim_snippet(row.get('summary'), width=32)}",
+                        row.get("started_at"),
+                        row.get("completed_at"),
+                        "",
+                    ]
+                )
+        ui.table(
+            "Activity",
+            ["Type", "ID", "Status", "Detail", "Started", "Completed", "Confidence"],
+            rows,
+        )
+        return 0
+
+    if action == "export":
+        case_id = _normalize_case_id(getattr(args, "case_id", None))
+        if case_id is None:
+            ui.error("Case ID is required.")
+            return 2
+
+        export_format = str(getattr(args, "format", "json"))
+        output_path = getattr(args, "output", None)
+
+        if not asyncio.run(_case_exists(case_id)):
+            ui.error(f"Case not found: {case_id}")
+            return 2
+
+        case_row, sessions, batches = asyncio.run(_load_case_bundle(case_id))
+        if case_row is None:
+            ui.error(f"Case loading failed: {case_id}")
+            return 2
+
+        payload = {
+            "case": case_row,
+            "rollup": _build_case_rollup(sessions, batches),
+            "sessions": sessions,
+            "batches": batches,
+        }
+
+        rendered = ""
+        if export_format == "json":
+            rendered = json.dumps(payload, indent=2, default=str)
+        elif export_format == "jsonl":
+            lines = [json.dumps({"type": "case", "record": case_row}, default=str)]
+            lines.extend(
+                json.dumps({"type": "session", "record": row}, default=str)
+                for row in sessions
+            )
+            lines.extend(
+                json.dumps({"type": "batch", "record": row}, default=str)
+                for row in batches
+            )
+            rendered = "\n".join(lines) + "\n"
+        else:
+            rendered = _render_case_export_markdown(payload)
+
+        if output_path:
+            Path(output_path).write_text(rendered, encoding="utf-8")
+            ui.success(f"Case export written: {output_path}")
+            return 0
+
+        print(rendered)
+        return 0
+
+    ui.error(f"Unknown case action: {action}")
+    return 2
+
+
 def _run_batch(ui: TerminalUI, args: argparse.Namespace) -> int:
     """Dispatch batch evaluation subcommand."""
     from aletheia.data_loader import load_methodology_breaks
+    from aletheia.db import get_connection
 
     benchmark = getattr(args, "benchmark", False)
     claims_file = getattr(args, "claims_file", None)
     output_path = getattr(args, "output", None)
+    case_id = _normalize_case_id(getattr(args, "case_id", None))
+
+    def _read_claims(path: str) -> list[str]:
+        file_path = Path(path)
+        if file_path.suffix.lower() != ".csv":
+            return [
+                line.strip()
+                for line in file_path.read_text().splitlines()
+                if line.strip()
+            ]
+
+        claims: list[str] = []
+        with file_path.open(newline="", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh)
+            if reader.fieldnames:
+                claim_key = None
+                for name in reader.fieldnames:
+                    if name is None:
+                        continue
+                    if name.strip().lower() in {"claim", "text", "description"}:
+                        claim_key = name
+                        break
+                if claim_key is not None:
+                    for row in reader:
+                        value = (row.get(claim_key) or "").strip()
+                        if value:
+                            claims.append(value)
+                    return claims
+
+        with file_path.open(newline="", encoding="utf-8") as fh:
+            for row in csv.reader(fh):
+                if not row:
+                    continue
+                value = row[0].strip()
+                if value:
+                    claims.append(value)
+        return claims
 
     if not benchmark and not claims_file:
         ui.error("Provide a claims file or use --benchmark.")
@@ -1858,35 +2835,160 @@ def _run_batch(ui: TerminalUI, args: argparse.Namespace) -> int:
         if not path.exists():
             ui.error(f"File not found: {claims_file}")
             return 2
-        claims = [line.strip() for line in path.read_text().splitlines() if line.strip()]
+        claims = _read_claims(claims_file)
         ui.info(f"Running batch: {len(claims)} claims from {claims_file}")
+
+    if not claims:
+        ui.error("No claims found in input.")
+        return 2
+
+    if case_id is not None and not asyncio.run(_case_exists(case_id)):
+        ui.error(f"Case not found: {case_id}")
+        return 2
 
     orchestrator = OrchestratorAgent()
     results: list[dict[str, Any]] = []
+    mode = "benchmark" if benchmark else "file"
+    batch_name = f"{mode}-{len(claims)}"
 
-    async def _run():
+    async def _run() -> tuple[str | None, dict[str, Any]]:
+        batch_id: str | None = None
+        status_counts: dict[str, int] = {}
+
+        async def _create_batch() -> str | None:
+            try:
+                async with get_connection() as db:
+                    created = await db.query(
+                        """
+                        CREATE batch SET
+                            name = $name,
+                            case_id = $case_id,
+                            status = 'running',
+                            total_claims = $total_claims,
+                            completed_claims = 0
+                        """,
+                        {
+                            "name": batch_name,
+                            "case_id": case_id,
+                            "total_claims": len(claims),
+                        },
+                    )
+                    rows = _query_result_rows(created)
+                    return str(rows[0].get("id")) if rows else None
+            except Exception as exc:  # noqa: BLE001
+                ui.warning(f"Batch tracking unavailable: {exc}")
+                return None
+
+        async def _link_case(batch_record: str) -> None:
+            if case_id is None:
+                return
+            try:
+                async with get_connection() as db:
+                    await db.query(
+                        "RELATE $case->has_batch->$batch",
+                        {"case": case_id, "batch": batch_record},
+                    )
+            except Exception:
+                return
+
+        async def _update_progress(completed: int) -> None:
+            if batch_id is None:
+                return
+            try:
+                async with get_connection() as db:
+                    await db.query(
+                        "UPDATE $batch SET completed_claims = $completed",
+                        {"batch": batch_id, "completed": completed},
+                    )
+            except Exception:
+                return
+
+        async def _complete_batch(summary: dict[str, Any]) -> None:
+            if batch_id is None:
+                return
+            try:
+                async with get_connection() as db:
+                    await db.query(
+                        """
+                        UPDATE $batch SET
+                            status = 'completed',
+                            completed_claims = $completed,
+                            completed_at = time::now(),
+                            results = $results
+                        """,
+                        {
+                            "batch": batch_id,
+                            "completed": len(results),
+                            "results": summary,
+                        },
+                    )
+            except Exception:
+                return
+
         try:
+            batch_id = await _create_batch()
+            if batch_id:
+                ui.info(f"Batch record: {batch_id}")
+                await _link_case(batch_id)
+
             for i, claim in enumerate(claims, 1):
-                ui.info(f"[{i}/{len(claims)}] {claim[:80]}...")
+                suffix = "" if len(claim) <= 80 else "..."
+                ui.info(f"[{i}/{len(claims)}] {claim[:80]}{suffix}")
                 try:
-                    verdict = await orchestrator.process_claim(claim)
-                    results.append({
-                        "claim": claim,
-                        "status": verdict.status.value,
-                        "confidence": verdict.confidence,
-                        "severity": verdict.severity.value,
-                        "comparability": verdict.comparability.value,
-                        "summary": verdict.summary,
-                        "breaks_found": len(verdict.breaks_found),
-                    })
+                    verdict = await orchestrator.process_claim(claim, case_id=case_id)
+                    status_key = verdict.status.value
+                    status_counts[status_key] = status_counts.get(status_key, 0) + 1
+                    results.append(
+                        {
+                            "claim": claim,
+                            "status": status_key,
+                            "confidence": verdict.confidence,
+                            "severity": verdict.severity.value,
+                            "comparability": verdict.comparability.value,
+                            "summary": verdict.summary,
+                            "breaks_found": len(verdict.breaks_found),
+                        }
+                    )
                 except Exception as exc:
                     results.append({"claim": claim, "error": str(exc)})
+                await _update_progress(i)
+
+            successful = [
+                row
+                for row in results
+                if "error" not in row
+                and isinstance(row.get("confidence"), (int, float))
+            ]
+            avg_confidence = (
+                sum(float(row["confidence"]) for row in successful) / len(successful)
+                if successful
+                else 0.0
+            )
+            summary = {
+                "total_claims": len(results),
+                "succeeded": len(successful),
+                "failed": len(results) - len(successful),
+                "avg_confidence": avg_confidence,
+                "status_counts": status_counts,
+            }
+            await _complete_batch(summary)
+            return batch_id, summary
         finally:
             await orchestrator.close()
 
-    asyncio.run(_run())
+    batch_id, summary = asyncio.run(_run())
 
-    output_json = json.dumps(results, indent=2)
+    output_payload = {
+        "batch_id": batch_id,
+        "case_id": case_id,
+        "name": batch_name,
+        "mode": mode,
+        "source": "PHASE3_BREAKS" if benchmark else claims_file,
+        "summary": summary,
+        "results": results,
+    }
+
+    output_json = json.dumps(output_payload, indent=2)
     if output_path:
         from pathlib import Path as P
 
@@ -1895,8 +2997,9 @@ def _run_batch(ui: TerminalUI, args: argparse.Namespace) -> int:
     else:
         print(output_json)
 
-    passed = sum(1 for r in results if "error" not in r)
-    ui.success(f"Batch complete: {passed}/{len(results)} succeeded")
+    ui.success(
+        f"Batch complete: {summary['succeeded']}/{summary['total_claims']} succeeded"
+    )
     return 0
 
 
@@ -1904,49 +3007,313 @@ def _run_graph(ui: TerminalUI, args: argparse.Namespace) -> int:
     """Dispatch graph query subcommand."""
     action = getattr(args, "graph_action", None)
     if not action:
-        ui.error("Missing graph action. Use: aletheia graph {provenance,impacts}")
+        ui.error(
+            "Missing graph action. Use: aletheia graph {provenance,impacts,timeline,recall}"
+        )
         return 2
 
-    from aletheia.db import get_connection
+    from aletheia.agents.archivist import ArchivistAgent
+
+    archivist = ArchivistAgent()
 
     if action == "provenance":
         session_id = args.session_id
 
-        async def _prov():
-            async with get_connection() as db:
-                result = await db.query(
-                    """
-                    SELECT *,
-                        ->uses_evidence->evidence_doc.* AS evidence,
-                        ->produces->verdict.* AS verdicts
-                    FROM $session
-                    """,
-                    {"session": session_id},
-                )
-                return result
+        payload = asyncio.run(archivist.provenance_chain(session_id))
+        if payload is None:
+            ui.error(f"Session not found: {session_id}")
+            return 2
 
-        result = asyncio.run(_prov())
-        print(json.dumps(result, indent=2, default=str))
+        session = (
+            payload.get("session") if isinstance(payload.get("session"), dict) else {}
+        )
+        ui.kv_table(
+            "Session",
+            [
+                ("id", session.get("id")),
+                ("case_id", session.get("case_id") or ""),
+                ("status", session.get("status")),
+                ("started_at", session.get("started_at")),
+                ("completed_at", session.get("completed_at")),
+            ],
+        )
+
+        documents = (
+            payload.get("documents")
+            if isinstance(payload.get("documents"), list)
+            else []
+        )
+        if documents:
+            ui.table(
+                "Evidence Documents",
+                ["ID", "Title", "URL"],
+                [
+                    [
+                        row.get("id"),
+                        row.get("title") or "",
+                        row.get("url") or "",
+                    ]
+                    for row in documents
+                    if isinstance(row, dict)
+                ],
+            )
+        else:
+            ui.warning("No evidence documents linked to this session.")
+
+        changes = (
+            payload.get("methodology_changes")
+            if isinstance(payload.get("methodology_changes"), list)
+            else []
+        )
+        if changes:
+            ui.table(
+                "Methodology Changes",
+                ["ID", "Type", "Effective", "Description", "Impact"],
+                [
+                    [
+                        row.get("id"),
+                        row.get("change_type") or "",
+                        row.get("effective_date") or "",
+                        _claim_snippet(row.get("description"), width=72),
+                        row.get("impact_estimate") or "",
+                    ]
+                    for row in changes
+                    if isinstance(row, dict)
+                ],
+            )
+
+        datasets = (
+            payload.get("datasets") if isinstance(payload.get("datasets"), list) else []
+        )
+        if datasets:
+            ui.table(
+                "Datasets",
+                ["ID", "Code", "Name"],
+                [
+                    [row.get("id"), row.get("code") or "", row.get("name") or ""]
+                    for row in datasets
+                    if isinstance(row, dict)
+                ],
+            )
+
+        agencies = (
+            payload.get("agencies") if isinstance(payload.get("agencies"), list) else []
+        )
+        if agencies:
+            ui.table(
+                "Agencies",
+                ["ID", "Code", "Name"],
+                [
+                    [row.get("id"), row.get("code") or "", row.get("name") or ""]
+                    for row in agencies
+                    if isinstance(row, dict)
+                ],
+            )
         return 0
 
     if action == "impacts":
         change_id = args.change_id
 
-        async def _impacts():
-            async with get_connection() as db:
-                result = await db.query(
-                    """
-                    SELECT *,
-                        ->affects->indicator.* AS affected_indicators,
-                        ->belongs_to->dataset.* AS datasets
-                    FROM $change
-                    """,
-                    {"change": change_id},
-                )
-                return result
+        payload = asyncio.run(archivist.change_impacts(change_id))
+        if payload is None:
+            ui.error(f"Methodology change not found: {change_id}")
+            return 2
 
-        result = asyncio.run(_impacts())
-        print(json.dumps(result, indent=2, default=str))
+        change = (
+            payload.get("change") if isinstance(payload.get("change"), dict) else {}
+        )
+        ui.kv_table(
+            "Methodology Change",
+            [
+                ("id", change.get("id")),
+                ("type", change.get("change_type")),
+                ("effective_date", change.get("effective_date") or ""),
+                ("severity", change.get("severity") or ""),
+                ("comparability", change.get("comparability") or ""),
+                ("impact_estimate", change.get("impact_estimate") or ""),
+                ("description", change.get("description") or ""),
+            ],
+        )
+
+        indicators = (
+            payload.get("indicators")
+            if isinstance(payload.get("indicators"), list)
+            else []
+        )
+        if indicators:
+            ui.table(
+                "Affected Indicators",
+                ["ID", "Code", "Name", "Unit"],
+                [
+                    [
+                        row.get("id"),
+                        row.get("code") or "",
+                        row.get("name") or "",
+                        row.get("unit") or "",
+                    ]
+                    for row in indicators
+                    if isinstance(row, dict)
+                ],
+            )
+        else:
+            ui.warning("No affected indicators linked to this methodology change.")
+
+        datasets = (
+            payload.get("datasets") if isinstance(payload.get("datasets"), list) else []
+        )
+        if datasets:
+            ui.table(
+                "Linked Datasets",
+                ["ID", "Code", "Name"],
+                [
+                    [row.get("id"), row.get("code") or "", row.get("name") or ""]
+                    for row in datasets
+                    if isinstance(row, dict)
+                ],
+            )
+
+        agencies = (
+            payload.get("agencies") if isinstance(payload.get("agencies"), list) else []
+        )
+        if agencies:
+            ui.table(
+                "Publishing Agencies",
+                ["ID", "Code", "Name"],
+                [
+                    [row.get("id"), row.get("code") or "", row.get("name") or ""]
+                    for row in agencies
+                    if isinstance(row, dict)
+                ],
+            )
+        return 0
+
+    if action == "timeline":
+        dataset_code = str(getattr(args, "dataset_code", "")).strip()
+        if not dataset_code:
+            ui.error("Dataset code is required.")
+            return 2
+
+        payload = asyncio.run(archivist.dataset_timeline(dataset_code))
+        if payload is None:
+            ui.error(f"Dataset not found: {dataset_code}")
+            return 2
+
+        dataset = (
+            payload.get("dataset") if isinstance(payload.get("dataset"), dict) else {}
+        )
+        ui.kv_table(
+            "Dataset",
+            [
+                ("id", dataset.get("id")),
+                ("code", dataset.get("code") or ""),
+                ("name", dataset.get("name") or ""),
+                ("description", dataset.get("description") or ""),
+            ],
+        )
+
+        changes = (
+            payload.get("changes") if isinstance(payload.get("changes"), list) else []
+        )
+        if not changes:
+            ui.warning("No methodology changes found for this dataset.")
+            return 0
+
+        ui.table(
+            "Methodology Timeline",
+            ["Effective", "ID", "Type", "Severity", "Comparability", "Description"],
+            [
+                [
+                    row.get("effective_date") or "",
+                    row.get("id"),
+                    row.get("change_type") or "",
+                    row.get("severity") or "",
+                    row.get("comparability") or "",
+                    _claim_snippet(row.get("description"), width=72),
+                ]
+                for row in changes
+                if isinstance(row, dict)
+            ],
+        )
+        return 0
+
+    if action == "recall":
+        source_session_id = str(getattr(args, "session_id", "") or "").strip() or None
+        dataset_code = str(getattr(args, "dataset_code", "") or "").strip() or None
+        indicator = str(getattr(args, "indicator", "") or "").strip() or None
+        limit = max(1, int(getattr(args, "limit", 10)))
+
+        if source_session_id is None and dataset_code is None and indicator is None:
+            ui.error("Provide --session or --dataset or --indicator.")
+            return 2
+
+        payload = asyncio.run(
+            archivist.prior_verification_recall(
+                dataset=dataset_code,
+                indicator=indicator,
+                session_id=source_session_id,
+                limit=limit,
+            )
+        )
+        query = payload.get("query") if isinstance(payload.get("query"), dict) else {}
+        matches = (
+            payload.get("matches") if isinstance(payload.get("matches"), list) else []
+        )
+
+        ui.kv_table(
+            "Recall Query",
+            [
+                ("source_session_id", query.get("source_session_id") or ""),
+                ("dataset", query.get("dataset") or ""),
+                ("indicator", query.get("indicator") or ""),
+                ("matches", len(matches)),
+            ],
+        )
+        if not matches:
+            ui.warning("No prior similar sessions found.")
+            return 0
+
+        rows: list[list[Any]] = []
+        for item in matches:
+            if not isinstance(item, dict):
+                continue
+            session = (
+                item.get("session") if isinstance(item.get("session"), dict) else {}
+            )
+            verdict = (
+                item.get("verdict") if isinstance(item.get("verdict"), dict) else {}
+            )
+            changes = (
+                item.get("methodology_changes")
+                if isinstance(item.get("methodology_changes"), list)
+                else []
+            )
+            rows.append(
+                [
+                    session.get("id"),
+                    session.get("case_id") or "",
+                    session.get("claim_dataset") or "",
+                    session.get("claim_indicator") or "",
+                    verdict.get("status") or "",
+                    verdict.get("confidence") or "",
+                    len(changes),
+                    session.get("started_at") or "",
+                ]
+            )
+
+        ui.table(
+            "Prior Verification Recall",
+            [
+                "Session",
+                "Case",
+                "Dataset",
+                "Indicator",
+                "Verdict",
+                "Confidence",
+                "Changes",
+                "Started",
+            ],
+            rows,
+        )
         return 0
 
     ui.error(f"Unknown graph action: {action}")
@@ -1976,15 +3343,22 @@ def main() -> int:
         return 0
     if command == "claim":
         claim = " ".join(args.text)
+        case_id = _normalize_case_id(getattr(args, "case_id", None))
+        if case_id is not None and not asyncio.run(_case_exists(case_id)):
+            ui.error(f"Case not found: {case_id}")
+            return 2
         asyncio.run(
             single_claim(
                 ui,
                 claim,
                 show_json=bool(args.json),
                 show_trace=bool(args.trace),
+                case_id=case_id,
             )
         )
         return 0
+    if command == "case":
+        return _run_case(ui, args)
     if command == "retrieval-stats":
         asyncio.run(show_retrieval_stats(ui, args.hours, args.limit))
         return 0
@@ -2007,7 +3381,9 @@ def main() -> int:
                     include_phase3_breaks=not getattr(args, "no_phase3_breaks", False),
                 )
             )
-            ui.success(f"Seed complete: {result['actions']} (db: {result['db_url_redacted']})")
+            ui.success(
+                f"Seed complete: {result['actions']} (db: {result['db_url_redacted']})"
+            )
             return 0
         except Exception as exc:
             ui.error(f"Seed failed: {exc}")
@@ -2021,7 +3397,9 @@ def main() -> int:
     if command == "models":
         return asyncio.run(show_models(ui, getattr(args, "models_action", None), args))
     if command == "endpoints":
-        return asyncio.run(show_endpoints(ui, getattr(args, "endpoints_action", None), args))
+        return asyncio.run(
+            show_endpoints(ui, getattr(args, "endpoints_action", None), args)
+        )
 
     parser.print_help()
     return 2

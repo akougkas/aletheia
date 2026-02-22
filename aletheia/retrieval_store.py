@@ -73,7 +73,13 @@ class RetrievalStore:
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
-    async def begin_run(self, claim: PolicyClaim, plan: "RoutingPlan") -> str | None:
+    async def begin_run(
+        self,
+        claim: PolicyClaim,
+        plan: "RoutingPlan",
+        *,
+        case_id: str | None = None,
+    ) -> str | None:
         query_hash = self.query_hash(claim, plan)
         try:
             async with get_connection() as db:
@@ -85,6 +91,7 @@ class RetrievalStore:
                         claim_dataset = $dataset,
                         claim_indicator = $indicator,
                         claim_type = $claim_type,
+                        case_id = $case_id,
                         status = 'running',
                         metadata = $metadata
                     """,
@@ -94,11 +101,18 @@ class RetrievalStore:
                         "dataset": claim.dataset,
                         "indicator": claim.indicator,
                         "claim_type": plan.claim_type.value,
+                        "case_id": case_id,
                         "metadata": {"source_ids": plan.source_ids},
                     },
                 )
                 rows = _query_result_rows(result)
-                return _surreal_id(rows[0]) if rows else None
+                run_id = _surreal_id(rows[0]) if rows else None
+                if run_id and case_id:
+                    await db.query(
+                        "RELATE $case->has_session->$session",
+                        {"case": case_id, "session": run_id},
+                    )
+                return run_id
         except Exception as exc:  # noqa: BLE001
             logger.warning("begin_run failed: %s", exc)
             return None

@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 aletheia = "cli:main"
+aletheia-smoke-case = "aletheia.tools.smoke_case_workflow:main"
 
 [project.optional-dependencies]
 dev = [

@@ -85,6 +85,16 @@ DEFINE ANALYZER chunk_analyzer TOKENIZERS blank, class FILTERS lowercase, snowba
 DEFINE INDEX idx_chunk_fulltext ON chunk FIELDS content
   SEARCH ANALYZER chunk_analyzer BM25;
 
+-- Investigation cases (user-level legal/research matters)
+DEFINE TABLE case SCHEMAFULL;
+DEFINE FIELD name ON case TYPE string ASSERT $value != NONE;
+DEFINE FIELD description ON case TYPE option<string>;
+DEFINE FIELD status ON case TYPE string DEFAULT 'active';
+DEFINE FIELD metadata ON case TYPE option<object>;
+DEFINE FIELD created_at ON case TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at ON case TYPE option<datetime>;
+DEFINE INDEX idx_case_name ON case FIELDS name;
+
 -- Analysis sessions (replaces retrieval_runs)
 DEFINE TABLE session SCHEMAFULL;
 DEFINE FIELD query_hash ON session TYPE string;
@@ -92,6 +102,7 @@ DEFINE FIELD claim_text ON session TYPE string;
 DEFINE FIELD claim_dataset ON session TYPE option<string>;
 DEFINE FIELD claim_indicator ON session TYPE option<string>;
 DEFINE FIELD claim_type ON session TYPE option<string>;
+DEFINE FIELD case_id ON session TYPE option<string>;
 DEFINE FIELD status ON session TYPE string DEFAULT 'running';
 DEFINE FIELD verdict ON session TYPE option<object>;
 DEFINE FIELD metadata ON session TYPE option<object>;
@@ -104,6 +115,7 @@ DEFINE INDEX idx_session_time ON session FIELDS started_at;
 -- Batch runs (for MethodBench evaluation)
 DEFINE TABLE batch SCHEMAFULL;
 DEFINE FIELD name ON batch TYPE string;
+DEFINE FIELD case_id ON batch TYPE option<string>;
 DEFINE FIELD status ON batch TYPE string DEFAULT 'pending';
 DEFINE FIELD total_claims ON batch TYPE int DEFAULT 0;
 DEFINE FIELD completed_claims ON batch TYPE int DEFAULT 0;
@@ -149,6 +161,14 @@ DEFINE FIELD relevance_score ON found TYPE option<float>;
 DEFINE FIELD confidence_score ON found TYPE option<float>;
 DEFINE FIELD is_cached ON found TYPE bool DEFAULT false;
 DEFINE FIELD rank ON found TYPE option<int>;
+
+-- case --has_session--> session
+DEFINE TABLE has_session SCHEMAFULL TYPE RELATION IN case OUT session;
+DEFINE INDEX idx_has_session_unique ON has_session FIELDS in, out UNIQUE;
+
+-- case --has_batch--> batch
+DEFINE TABLE has_batch SCHEMAFULL TYPE RELATION IN case OUT batch;
+DEFINE INDEX idx_has_batch_unique ON has_batch FIELDS in, out UNIQUE;
 
 -- session --part_of_batch--> batch
 DEFINE TABLE part_of_batch SCHEMAFULL TYPE RELATION IN session OUT batch;

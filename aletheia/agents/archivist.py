@@ -50,7 +50,9 @@ class ArchivistAgent(Agent):
 
     name = "Archivist"
     role = "Data Provenance"
-    system_prompt = "You identify methodology changes that could affect data interpretation."
+    system_prompt = (
+        "You identify methodology changes that could affect data interpretation."
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -151,7 +153,9 @@ class ArchivistAgent(Agent):
             rows = _query_result_rows(result)
             return rows[0] if rows else None
 
-    def _dedupe_breaks(self, breaks: list[MethodologyChange]) -> list[MethodologyChange]:
+    def _dedupe_breaks(
+        self, breaks: list[MethodologyChange]
+    ) -> list[MethodologyChange]:
         by_key: dict[tuple[int | None, str | None], MethodologyChange] = {}
         for change in breaks:
             key = (change.id, change.benchmark_case_id)
@@ -184,7 +188,9 @@ class ArchivistAgent(Agent):
         """Find methodology changes relevant to a policy claim."""
         breaks: list[MethodologyChange] = []
         dataset_row = await self._find_dataset_row(claim)
-        period_end_year = extract_year(claim.period_end) or extract_year(claim.period_start)
+        period_end_year = extract_year(claim.period_end) or extract_year(
+            claim.period_start
+        )
 
         if dataset_row:
             ds_id = str(dataset_row.get("id", ""))
@@ -220,7 +226,9 @@ class ArchivistAgent(Agent):
 
         # Semantic fallback catches claims with vague dataset names
         semantic_rows = await self.semantic_search_breaks(claim.original_text, limit=5)
-        semantic_ids = [str(row.get("id", "")) for row in semantic_rows if row.get("id") is not None]
+        semantic_ids = [
+            str(row.get("id", "")) for row in semantic_rows if row.get("id") is not None
+        ]
         if semantic_ids:
             breaks.extend(await self._hydrate_breaks_by_ids(semantic_ids))
 
@@ -356,21 +364,280 @@ class ArchivistAgent(Agent):
     # New graph query methods
     # ------------------------------------------------------------------
 
-    async def provenance_chain(self, session_id: str) -> list[dict]:
+    def _flatten_dict_records(self, value: Any) -> list[dict[str, Any]]:
+        if isinstance(value, dict):
+            return [value]
+        if not isinstance(value, list):
+            return []
+        rows: list[dict[str, Any]] = []
+        for item in value:
+            rows.extend(self._flatten_dict_records(item))
+        return rows
+
+    def _dedupe_by_id(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        by_id: dict[str, dict[str, Any]] = {}
+        for row in records:
+            row_id = str(row.get("id") or "")
+            if not row_id:
+                continue
+            by_id[row_id] = row
+        return list(by_id.values())
+
+    async def provenance_chain(self, session_id: str) -> dict[str, Any] | None:
         """Full provenance: session -> evidence -> methodology change -> dataset -> agency."""
         async with get_connection() as db:
             result = await db.query(
                 """
                 SELECT
-                    ->found->document.title AS doc_titles,
-                    ->found->document<-describes<-methodology_change.description AS change_descriptions,
-                    ->found->document<-describes<-methodology_change->belongs_to->dataset.code AS dataset_codes,
-                    ->found->document<-describes<-methodology_change->belongs_to->dataset<-publishes<-agency.code AS agency_codes
+                    id,
+                    case_id,
+                    claim_text,
+                    status,
+                    started_at,
+                    completed_at,
+                    ->found->document.{id, title, url} AS documents,
+                    ->found->document<-describes<-methodology_change.{id, change_type, effective_date, description, impact_estimate} AS methodology_changes,
+                    ->found->document<-describes<-methodology_change->belongs_to->dataset.{id, code, name} AS datasets,
+                    ->found->document<-describes<-methodology_change->belongs_to->dataset<-publishes<-agency.{id, code, name} AS agencies
                 FROM $session_id
+                LIMIT 1
                 """,
                 {"session_id": session_id},
             )
-            return _query_result_rows(result)
+            rows = _query_result_rows(result)
+            if not rows:
+                return None
+            row = rows[0]
+            documents = self._dedupe_by_id(
+                self._flatten_dict_records(row.get("documents", []))
+            )
+            changes = self._dedupe_by_id(
+                self._flatten_dict_records(row.get("methodology_changes", []))
+            )
+            changes = sorted(
+                changes, key=lambda item: str(item.get("effective_date") or "")
+            )
+            datasets = self._dedupe_by_id(
+                self._flatten_dict_records(row.get("datasets", []))
+            )
+            agencies = self._dedupe_by_id(
+                self._flatten_dict_records(row.get("agencies", []))
+            )
+            return {
+                "session": {
+                    "id": row.get("id"),
+                    "case_id": row.get("case_id"),
+                    "claim_text": row.get("claim_text"),
+                    "status": row.get("status"),
+                    "started_at": row.get("started_at"),
+                    "completed_at": row.get("completed_at"),
+                },
+                "documents": documents,
+                "methodology_changes": changes,
+                "datasets": datasets,
+                "agencies": agencies,
+            }
+
+    async def change_impacts(self, change_id: str) -> dict[str, Any] | None:
+        """Get a methodology change with linked indicators/datasets/agencies."""
+        async with get_connection() as db:
+            change_result = await db.query(
+                """
+                SELECT id, benchmark_case_id, change_type, effective_date, description, impact_estimate, severity, comparability, source_url
+                FROM $id
+                LIMIT 1
+                """,
+                {"id": change_id},
+            )
+            change_rows = _query_result_rows(change_result)
+            if not change_rows:
+                return None
+
+            indicators_result = await db.query(
+                """
+                SELECT id, code, name, unit
+                FROM $id->affects->indicator
+                """,
+                {"id": change_id},
+            )
+            datasets_result = await db.query(
+                """
+                SELECT id, code, name
+                FROM $id->belongs_to->dataset
+                """,
+                {"id": change_id},
+            )
+            agencies_result = await db.query(
+                """
+                SELECT id, code, name
+                FROM $id->belongs_to->dataset<-publishes<-agency
+                """,
+                {"id": change_id},
+            )
+
+            return {
+                "change": change_rows[0],
+                "indicators": self._dedupe_by_id(_query_result_rows(indicators_result)),
+                "datasets": self._dedupe_by_id(_query_result_rows(datasets_result)),
+                "agencies": self._dedupe_by_id(_query_result_rows(agencies_result)),
+            }
+
+    async def dataset_timeline(self, dataset_code: str) -> dict[str, Any] | None:
+        """Get chronological methodology change timeline for a dataset code."""
+        normalized = self._normalize_dataset_code(dataset_code)
+        if not normalized:
+            return None
+
+        async with get_connection() as db:
+            dataset_result = await db.query(
+                """
+                SELECT id, code, name, description
+                FROM dataset
+                WHERE string::uppercase(code) = string::uppercase($code)
+                LIMIT 1
+                """,
+                {"code": normalized},
+            )
+            dataset_rows = _query_result_rows(dataset_result)
+            if not dataset_rows:
+                return None
+
+            dataset = dataset_rows[0]
+            changes_result = await db.query(
+                """
+                SELECT id, benchmark_case_id, change_type, effective_date, description, impact_estimate, severity, comparability
+                FROM methodology_change
+                WHERE ->belongs_to->dataset CONTAINS $dataset_id
+                ORDER BY effective_date ASC
+                """,
+                {"dataset_id": str(dataset.get("id"))},
+            )
+            changes = _query_result_rows(changes_result)
+            return {"dataset": dataset, "changes": changes}
+
+    async def prior_verification_recall(
+        self,
+        *,
+        dataset: str | None = None,
+        indicator: str | None = None,
+        session_id: str | None = None,
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        """Find prior similar completed sessions and their linked methodology changes."""
+        normalized_dataset = self._normalize_dataset_code(dataset)
+        normalized_indicator = (indicator or "").strip() or None
+        source_session_id = session_id
+
+        async with get_connection() as db:
+            if source_session_id:
+                source_result = await db.query(
+                    """
+                    SELECT id, claim_dataset, claim_indicator
+                    FROM $id
+                    LIMIT 1
+                    """,
+                    {"id": source_session_id},
+                )
+                source_rows = _query_result_rows(source_result)
+                if source_rows:
+                    source_row = source_rows[0]
+                    if normalized_dataset is None:
+                        normalized_dataset = self._normalize_dataset_code(
+                            source_row.get("claim_dataset")
+                        )
+                    if normalized_indicator is None:
+                        source_indicator = source_row.get("claim_indicator")
+                        normalized_indicator = (
+                            str(source_indicator).strip() if source_indicator else None
+                        )
+
+            if normalized_dataset is None and normalized_indicator is None:
+                return {
+                    "query": {
+                        "dataset": None,
+                        "indicator": None,
+                        "source_session_id": source_session_id,
+                    },
+                    "matches": [],
+                }
+
+            result = await db.query(
+                """
+                SELECT
+                    id,
+                    case_id,
+                    claim_text,
+                    claim_dataset,
+                    claim_indicator,
+                    status,
+                    verdict,
+                    metadata,
+                    started_at,
+                    completed_at,
+                    ->found->document<-describes<-methodology_change.{id, change_type, effective_date, description, impact_estimate} AS methodology_changes
+                FROM session
+                WHERE status = 'completed'
+                  AND (
+                    ($has_dataset AND claim_dataset != NONE AND string::uppercase(claim_dataset) = string::uppercase($dataset))
+                    OR ($has_indicator AND claim_indicator != NONE AND string::lowercase(claim_indicator) CONTAINS string::lowercase($indicator))
+                  )
+                ORDER BY started_at DESC
+                LIMIT $limit
+                """,
+                {
+                    "has_dataset": normalized_dataset is not None,
+                    "dataset": normalized_dataset,
+                    "has_indicator": normalized_indicator is not None,
+                    "indicator": normalized_indicator,
+                    "limit": max(1, int(limit)),
+                },
+            )
+            rows = _query_result_rows(result)
+
+        matches: list[dict[str, Any]] = []
+        for row in rows:
+            row_id = str(row.get("id") or "")
+            if source_session_id and row_id == source_session_id:
+                continue
+            changes = self._dedupe_by_id(
+                self._flatten_dict_records(row.get("methodology_changes", []))
+            )
+            changes = sorted(
+                changes, key=lambda item: str(item.get("effective_date") or "")
+            )
+            verdict = row.get("verdict") if isinstance(row.get("verdict"), dict) else {}
+            metadata = (
+                row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+            )
+            matches.append(
+                {
+                    "session": {
+                        "id": row.get("id"),
+                        "case_id": row.get("case_id"),
+                        "claim_text": row.get("claim_text"),
+                        "claim_dataset": row.get("claim_dataset"),
+                        "claim_indicator": row.get("claim_indicator"),
+                        "status": row.get("status"),
+                        "started_at": row.get("started_at"),
+                        "completed_at": row.get("completed_at"),
+                    },
+                    "verdict": {
+                        "status": verdict.get("status"),
+                        "confidence": verdict.get("confidence"),
+                    },
+                    "aggregate_confidence": metadata.get("aggregate_confidence"),
+                    "methodology_changes": changes,
+                }
+            )
+
+        return {
+            "query": {
+                "dataset": normalized_dataset,
+                "indicator": normalized_indicator,
+                "source_session_id": source_session_id,
+            },
+            "matches": matches,
+        }
 
     async def affected_indicators(self, change_id: str) -> list[dict]:
         """Get all indicators affected by a methodology change."""

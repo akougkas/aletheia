@@ -33,21 +33,24 @@ Verify: `uv run python -m pytest tests/ -v` still 168 passed.
 
 ---
 
-## Next: Batch Mode Hardening
+## Next: Batch Mode Hardening (case-centric update)
 
-**What works now:** `aletheia batch --benchmark` iterates 40 break descriptions through
-the orchestrator and dumps JSON. No DB tracking, no progress, no RELATE edges.
+**What works now:** `aletheia batch --benchmark` and `aletheia batch claims.csv`
+create `batch` records, update progress, and emit structured output.
 
 **What it should do:**
 
 1. Create a `batch` record in SurrealDB on start
-2. Each claim creates a `session`, linked via `RELATE session->part_of_batch->batch`
+2. Each claim creates a `session`; case-level linking remains:
+   - `case ->has_session-> session`
+   - `case ->has_batch-> batch`
 3. TUI progress bar: `[12/40] PH3-012 NHIS e-cigarette...`
 4. On completion: update `batch.completed_at`, `batch.results` with summary stats
 5. `aletheia batch --benchmark --output eval.json` writes structured results
 6. `aletheia batch claims.csv` reads user-provided claim file (one per line or CSV)
 
-**Schema support:** Already in `surql/init.surql` (batch table, part_of_batch edge).
+**Schema support:** Already in `surql/init.surql` (`batch`, `session`, `case`,
+`has_session`, `has_batch`).
 
 **Files:** `cli.py` (`_run_batch` function — extend existing).
 
@@ -55,8 +58,8 @@ the orchestrator and dumps JSON. No DB tracking, no progress, no RELATE edges.
 
 ## Next: Graph Query Enrichment
 
-**What works now:** `aletheia graph provenance <session-id>` and `impacts <change-id>`
-dump raw SurrealQL JSON. No TUI rendering.
+**What works now:** `graph provenance` and `graph impacts` render readable tables,
+and `graph timeline <dataset-code>` provides chronology by dataset.
 
 **What it should do:**
 
@@ -73,8 +76,11 @@ dump raw SurrealQL JSON. No TUI rendering.
    Dataset: EU-LFS (EUROSTAT)
    ```
 
-3. Add `graph timeline <dataset-code>` — show all methodology changes for a dataset
-   ordered by effective_date. Useful for research.
+3. Expand the queries from "single hop report" to "oracle graph" views that expose:
+   - prior verifications
+   - ingestion provenance
+   - relation confidence metadata
+   - cross-case recall paths
 
 **Files:** `cli.py` (graph rendering), possibly `aletheia/agents/archivist.py` (new query methods).
 
@@ -82,7 +88,37 @@ dump raw SurrealQL JSON. No TUI rendering.
 
 ## Next: Session History & Export
 
-**Not started.** Low priority — revisit when evaluation workflow demands it.
+Superseded by `case history` and `case export` for the case-centric workflow.
+
+---
+
+## Graph Oracle Phase (Incremental)
+
+Build the knowledge graph as an operational "Aletheia brain" across three surfaces.
+
+### 1) Backend Infrastructure
+
+- Preserve strict write-time graph integrity (records + required RELATE edges).
+- Add repair commands for legacy records, but keep read paths graph-first.
+- Enrich edge metadata over time (confidence, source quality, ingest run IDs).
+
+### 2) Human Infrastructure (UX/UI)
+
+- Keep case-centric operator journey clear:
+  - create case
+  - run claim/batch with `--case`
+  - review case history/export
+  - inspect graph provenance/impacts/timeline
+- Output should be concise for command-line use and readable in plain mode.
+
+### 3) Agent Infrastructure
+
+- Archivist remains the graph query layer for CLI + orchestrator use.
+- Orchestrator/editor should progressively consume richer graph context:
+  - prior methodology findings
+  - source lineage
+  - similar-case retrieval hooks
+- Keep all query methods deterministic and testable for reproducibility.
 
 ```
 aletheia history                    # Recent verdicts from session table

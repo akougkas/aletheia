@@ -216,7 +216,9 @@ async def test_pipeline_uses_fallback_when_primary_sources_are_empty():
 
     aggregated = await pipeline.collect(claim)
     assert aggregated.fallback_used is True
-    assert any(output.source_id == "web_fallback" for output in aggregated.source_outputs)
+    assert any(
+        output.source_id == "web_fallback" for output in aggregated.source_outputs
+    )
     assert aggregated.evidence_docs[0]["source_id"] == "web_fallback"
 
 
@@ -260,7 +262,13 @@ class _FakeStore:
             }
         ]
 
-    async def begin_run(self, claim: PolicyClaim, plan: RoutingPlan):  # noqa: ARG002
+    async def begin_run(
+        self,
+        claim: PolicyClaim,
+        plan: RoutingPlan,
+        *,
+        case_id: str | None = None,  # noqa: ARG002
+    ):
         self.begin_called = True
         return 123
 
@@ -427,7 +435,9 @@ async def test_scholar_source_enforces_allowlist(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_scholar_source_balanced_mode_keeps_non_allowlisted_with_metadata(monkeypatch):
+async def test_scholar_source_balanced_mode_keeps_non_allowlisted_with_metadata(
+    monkeypatch,
+):
     monkeypatch.setenv("ALETHEIA_SCHOLAR_ALLOW_DOMAINS", "doi.org")
     monkeypatch.setenv("ALETHEIA_SCHOLAR_ALLOWLIST_MODE", "balanced")
     source = ScholarPaperEvidenceSource(search_client=_ScholarClient())
@@ -455,7 +465,9 @@ async def test_pipeline_source_budget_skips_extra_calls(monkeypatch):
         "primary_empty",
         SourceOutput(
             source_id="primary_empty",
-            evidence_docs=[{"title": "One", "content": "doc", "url": "https://example.org"}],
+            evidence_docs=[
+                {"title": "One", "content": "doc", "url": "https://example.org"}
+            ],
         ),
     )
     pipeline = EvidencePipeline(

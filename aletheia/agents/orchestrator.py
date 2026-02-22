@@ -31,7 +31,9 @@ class OrchestratorAgent(Agent):
 
     name = "ChiefAnalyst"
     role = "Orchestrator"
-    system_prompt = "You coordinate the analysis of policy claims for methodology awareness."
+    system_prompt = (
+        "You coordinate the analysis of policy claims for methodology awareness."
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -115,6 +117,7 @@ class OrchestratorAgent(Agent):
         *,
         runtime_overrides: dict[str, str] | None = None,
         progress_callback=None,
+        case_id: str | None = None,
     ) -> Verdict:
         """Process a natural language claim through the full pipeline."""
         self.trace = []  # Reset trace for new claim
@@ -139,14 +142,21 @@ class OrchestratorAgent(Agent):
                     confidence=0.0,
                 )
 
-            self._log_message("Auditor", "ChiefAnalyst", "response", claim.model_dump_json())
-            self.log(f"Parsed claim: indicator={claim.indicator}, dataset={claim.dataset}")
+            self._log_message(
+                "Auditor", "ChiefAnalyst", "response", claim.model_dump_json()
+            )
+            self.log(
+                f"Parsed claim: indicator={claim.indicator}, dataset={claim.dataset}"
+            )
 
             # Step 2: Route claim to source strategy and aggregate evidence.
-            self._log_message("ChiefAnalyst", "Router", "request", "Select evidence strategy")
+            self._log_message(
+                "ChiefAnalyst", "Router", "request", "Select evidence strategy"
+            )
             aggregated = await self.evidence_pipeline.collect_with_progress(
                 claim,
                 progress_callback=progress_callback,
+                case_id=case_id,
             )
             breaks = aggregated.breaks
             analysis = dict(aggregated.analysis)
@@ -190,6 +200,13 @@ class OrchestratorAgent(Agent):
             if decomposition:
                 analysis["methodology_vs_real"] = decomposition
 
+            prior_recall = await self.archivist.prior_verification_recall(
+                dataset=claim.dataset,
+                indicator=claim.indicator,
+                limit=5,
+            )
+            analysis["prior_verification_recall"] = prior_recall
+
             source_outputs_summary = [
                 {
                     "source_id": output.source_id,
@@ -208,7 +225,9 @@ class OrchestratorAgent(Agent):
                     "claim_type": aggregated.plan.claim_type.value,
                     "source_ids": list(aggregated.plan.source_ids),
                     "fallback_source_id": aggregated.plan.fallback_source_id,
-                    "deep_research_source_ids": list(aggregated.plan.deep_research_source_ids),
+                    "deep_research_source_ids": list(
+                        aggregated.plan.deep_research_source_ids
+                    ),
                 },
                 "source_outputs": source_outputs_summary,
                 "break_count": len(breaks),
@@ -220,9 +239,22 @@ class OrchestratorAgent(Agent):
                 "thinking_blocks": thinking_blocks,
             }
 
-            self._log_message("Archivist", "ChiefAnalyst", "response", f"Found {len(breaks)} breaks")
+            self._log_message(
+                "Archivist", "ChiefAnalyst", "response", f"Found {len(breaks)} breaks"
+            )
+            self._log_message(
+                "Archivist",
+                "ChiefAnalyst",
+                "response",
+                f"Prior recall matches={len(prior_recall.get('matches', []))}",
+            )
             self._log_message("Analyst", "ChiefAnalyst", "response", str(analysis))
-            self._log_message("Aggregator", "ChiefAnalyst", "response", f"Ranked {len(evidence_docs)} evidence snippets")
+            self._log_message(
+                "Aggregator",
+                "ChiefAnalyst",
+                "response",
+                f"Ranked {len(evidence_docs)} evidence snippets",
+            )
             self.log(f"Found {len(breaks)} methodology breaks")
 
             # Step 3: Synthesize verdict
@@ -235,7 +267,9 @@ class OrchestratorAgent(Agent):
                 evidence_docs=evidence_docs,
             )
             await self._emit_progress(progress_callback, {"event": "editor_completed"})
-            self._log_message("Editor", "ChiefAnalyst", "response", verdict.status.value)
+            self._log_message(
+                "Editor", "ChiefAnalyst", "response", verdict.status.value
+            )
             self.last_run_details["verdict"] = {
                 "status": verdict.status.value,
                 "severity": verdict.severity.value,
