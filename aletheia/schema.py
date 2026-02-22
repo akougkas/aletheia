@@ -149,3 +149,6 @@ class Verdict(BaseModel):
     # Alternative interpretations
     scenarios: Optional[dict[str, str]] = None  # e.g., {"with_old_method": "...", "with_new_method": "..."}
     methodology_vs_real: Optional[dict[str, Any]] = None
+
+    # Recall-aware synthesis audit trail
+    recall_adjustment: Optional[dict[str, Any]] = None

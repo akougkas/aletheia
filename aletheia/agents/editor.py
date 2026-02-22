@@ -41,6 +41,13 @@ class EditorAgent(Agent):
     role = "Verdict Synthesis"
     system_prompt = EDITOR_SYSTEM_PROMPT
 
+    # --- Recall policy constants ---
+    RECALL_MIN_MATCHES = 2
+    RECALL_MIN_CONSENSUS = 0.5
+    RECALL_MAX_DELTA = 0.08
+    RECALL_TIEBREAK_MIN_MATCHES = 3
+    RECALL_TIEBREAK_MIN_CONSENSUS = 0.8
+
     _severity_rank = {
         SeverityLevel.UNKNOWN: 0,
         SeverityLevel.MINOR: 1,
@@ -93,6 +100,210 @@ class EditorAgent(Agent):
         text = f"{change.description} {change.impact_estimate or ''}".lower()
         revision_terms = ("revision", "late registration", "backlog", "preliminary")
         return change.change_type.value == "other" and any(term in text for term in revision_terms)
+
+    def _compute_recall_adjustment(
+        self,
+        recall: dict | None,
+        current_status: VerdictStatus,
+        current_breaks: list[MethodologyChange],
+    ) -> dict[str, Any]:
+        """Compute deterministic recall-based confidence adjustment.
+
+        Returns dict with recall_delta, recall_reason, recall_metrics.
+        Hard cap: abs(delta) <= 0.08.
+        """
+        NO_EFFECT: dict[str, Any] = {
+            "recall_delta": 0.0,
+            "recall_reason": "no_recall_data",
+            "recall_metrics": {},
+        }
+
+        if not recall or not isinstance(recall, dict):
+            return NO_EFFECT
+
+        matches = recall.get("matches")
+        if not matches or not isinstance(matches, list):
+            return NO_EFFECT
+
+        recall_match_count = len(matches)
+
+        # Status distribution across prior verdicts.
+        status_counts: dict[str, int] = {}
+        for m in matches:
+            verdict = m.get("verdict") or {}
+            v_status = verdict.get("status")
+            if v_status and isinstance(v_status, str):
+                status_counts[v_status] = status_counts.get(v_status, 0) + 1
+
+        # Consensus strength: majority fraction.
+        total_with_status = sum(status_counts.values())
+        if total_with_status > 0:
+            majority_count = max(status_counts.values())
+            recall_consensus_strength = majority_count / total_with_status
+            majority_status = max(status_counts, key=lambda k: status_counts[k])
+        else:
+            recall_consensus_strength = 0.0
+            majority_status = None
+
+        # Change overlap ratio — prefer benchmark_case_id, fall back to (change_type, year).
+        current_case_ids: set[str] = set()
+        current_keys: set[tuple[str, int | None]] = set()
+        for b in current_breaks:
+            if b.benchmark_case_id:
+                current_case_ids.add(b.benchmark_case_id)
+            year = b.effective_date.year if b.effective_date else None
+            current_keys.add((b.change_type.value, year))
+
+        recall_case_ids: set[str] = set()
+        recall_keys: set[tuple[str, int | None]] = set()
+        for m in matches:
+            for mc in m.get("methodology_changes") or []:
+                bcid = mc.get("benchmark_case_id")
+                if bcid and isinstance(bcid, str):
+                    recall_case_ids.add(bcid)
+                ct = mc.get("change_type")
+                ed = mc.get("effective_date")
+                year = None
+                if isinstance(ed, str) and len(ed) >= 4:
+                    try:
+                        year = int(ed[:4])
+                    except (ValueError, TypeError):
+                        pass
+                if ct:
+                    recall_keys.add((str(ct), year))
+
+        # Use benchmark_case_id Jaccard when both sides have IDs.
+        if current_case_ids and recall_case_ids:
+            union = len(current_case_ids | recall_case_ids)
+            recall_change_overlap_ratio = (
+                len(current_case_ids & recall_case_ids) / union if union > 0 else 0.0
+            )
+        elif current_keys and recall_keys:
+            union = len(current_keys | recall_keys)
+            recall_change_overlap_ratio = (
+                len(current_keys & recall_keys) / union if union > 0 else 0.0
+            )
+        else:
+            recall_change_overlap_ratio = 0.0
+
+        # Weighted confidence mean from prior verdicts.
+        conf_values: list[float] = []
+        for m in matches:
+            v = m.get("verdict") or {}
+            conf = v.get("confidence")
+            agg = m.get("aggregate_confidence")
+            c = (
+                conf
+                if isinstance(conf, (int, float))
+                else (agg if isinstance(agg, (int, float)) else None)
+            )
+            if c is not None:
+                conf_values.append(float(c))
+
+        recall_weighted_confidence_mean = (
+            sum(conf_values) / len(conf_values) if conf_values else 0.0
+        )
+
+        metrics = {
+            "recall_match_count": recall_match_count,
+            "recall_status_distribution": dict(status_counts),
+            "recall_consensus_strength": round(recall_consensus_strength, 3),
+            "recall_change_overlap_ratio": round(recall_change_overlap_ratio, 3),
+            "recall_weighted_confidence_mean": round(recall_weighted_confidence_mean, 3),
+            "recall_majority_status": majority_status,
+        }
+
+        # Gate: need minimum matches with minimum consensus.
+        if (
+            recall_match_count < self.RECALL_MIN_MATCHES
+            or recall_consensus_strength < self.RECALL_MIN_CONSENSUS
+        ):
+            return {
+                "recall_delta": 0.0,
+                "recall_reason": "insufficient_recall",
+                "recall_metrics": metrics,
+            }
+
+        # Alignment check.
+        aligned = majority_status == current_status.value
+
+        # Bounded delta: scale by match density, consensus, prior confidence.
+        count_factor = min(recall_match_count, 5) / 5
+        raw_magnitude = (
+            count_factor
+            * recall_consensus_strength
+            * max(recall_weighted_confidence_mean, 0.3)
+            * self.RECALL_MAX_DELTA
+        )
+
+        CAP = self.RECALL_MAX_DELTA
+        if aligned:
+            delta = min(raw_magnitude, CAP)
+            reason = "aligned_recall"
+        else:
+            delta = -min(raw_magnitude, CAP)
+            reason = "conflicting_recall"
+
+        return {
+            "recall_delta": round(delta, 4),
+            "recall_reason": reason,
+            "recall_metrics": metrics,
+        }
+
+    def _apply_recall_tiebreak(
+        self,
+        status: VerdictStatus,
+        recall_adj: dict[str, Any],
+        structure_signal: bool,
+        relevant_breaks: list[MethodologyChange],
+        severity: SeverityLevel,
+    ) -> tuple[VerdictStatus, str | None]:
+        """Attempt recall-based status tie-break for PARTIALLY_SUPPORTED verdicts.
+
+        Strict gates:
+        - Only PARTIALLY_SUPPORTED status is eligible.
+        - Requires RECALL_TIEBREAK_MIN_MATCHES and RECALL_TIEBREAK_MIN_CONSENSUS.
+        - Must not conflict with structural signal.
+
+        Returns (new_status, caveat_text) or (status, None) if no tie-break.
+        """
+        if status != VerdictStatus.PARTIALLY_SUPPORTED:
+            return status, None
+
+        metrics = recall_adj.get("recall_metrics") or {}
+        match_count = metrics.get("recall_match_count", 0)
+        consensus = metrics.get("recall_consensus_strength", 0.0)
+        majority = metrics.get("recall_majority_status")
+
+        if match_count < self.RECALL_TIEBREAK_MIN_MATCHES:
+            return status, None
+        if consensus < self.RECALL_TIEBREAK_MIN_CONSENSUS:
+            return status, None
+        if majority is None or majority == VerdictStatus.PARTIALLY_SUPPORTED.value:
+            return status, None
+
+        if majority == VerdictStatus.SUPPORTED.value:
+            # Block if structural signal detected a break.
+            if structure_signal:
+                return status, None
+            # Block if relevant breaks with MODERATE+ severity exist.
+            if relevant_breaks and self._severity_rank.get(severity, 0) >= 2:
+                return status, None
+            return VerdictStatus.SUPPORTED, (
+                f"Status adjusted to supported based on {match_count} prior verification(s) "
+                f"with {consensus:.0%} consensus; no conflicting structural signal."
+            )
+
+        if majority == VerdictStatus.MISLEADING.value:
+            # Require corroboration: structure_signal OR severity >= MAJOR.
+            if not structure_signal and self._severity_rank.get(severity, 0) < 3:
+                return status, None
+            return VerdictStatus.MISLEADING, (
+                f"Status adjusted to misleading based on {match_count} prior verification(s) "
+                f"with {consensus:.0%} consensus; structural signal does not contradict."
+            )
+
+        return status, None
 
     def _has_overlapping_breaks(self, breaks: list[MethodologyChange]) -> bool:
         years = [extract_year(change.effective_date) for change in breaks if change.effective_date]
@@ -379,6 +590,45 @@ Methodology changes:
             confidence -= 0.06
         confidence = max(0.2, min(confidence, 0.95))
 
+        # --- Recall-aware confidence adjustment ---
+        recall_adj = self._compute_recall_adjustment(
+            analysis.get("prior_verification_recall"), status, relevant_breaks,
+        )
+        recall_delta = recall_adj["recall_delta"]
+        if recall_delta != 0.0:
+            confidence += recall_delta
+            confidence = max(0.2, min(confidence, 0.95))
+
+        if recall_adj["recall_reason"] == "aligned_recall":
+            rm = recall_adj["recall_metrics"]
+            caveats.append(
+                f"Consistent with {rm['recall_match_count']} prior similar verification(s) "
+                f"(majority verdict: {rm['recall_majority_status']})."
+            )
+        elif recall_adj["recall_reason"] == "conflicting_recall":
+            rm = recall_adj["recall_metrics"]
+            caveats.append(
+                f"Conflicts with {rm['recall_match_count']} prior similar verification(s) "
+                f"(majority verdict: {rm['recall_majority_status']}); confidence reduced."
+            )
+
+        # --- Recall-based borderline tie-break ---
+        tiebreak_status, tiebreak_caveat = self._apply_recall_tiebreak(
+            status, recall_adj, structure_signal, relevant_breaks, severity,
+        )
+        if tiebreak_status != status:
+            status = tiebreak_status
+            recall_adj["recall_tiebreak"] = tiebreak_caveat
+            caveats.append(tiebreak_caveat)
+            # Rebuild summary for new status.
+            summary = self._build_summary(
+                claim=claim,
+                status=status,
+                comparability=comparability,
+                relevant_breaks=relevant_breaks,
+                decomposition=decomposition if isinstance(decomposition, dict) else None,
+            )
+
         scenarios = None
         if isinstance(decomposition, dict):
             share = decomposition.get("methodology_share_estimate")
@@ -406,4 +656,5 @@ Methodology changes:
             evidence_snippets=evidence_snippets,
             scenarios=scenarios,
             methodology_vs_real=decomposition if isinstance(decomposition, dict) else None,
+            recall_adjustment=recall_adj,
         )

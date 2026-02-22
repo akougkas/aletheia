@@ -574,7 +574,7 @@ class ArchivistAgent(Agent):
                     metadata,
                     started_at,
                     completed_at,
-                    ->found->document<-describes<-methodology_change.{id, change_type, effective_date, description, impact_estimate} AS methodology_changes
+                    ->found->document<-describes<-methodology_change.{id, benchmark_case_id, change_type, effective_date, description, impact_estimate} AS methodology_changes
                 FROM session
                 WHERE status = 'completed'
                   AND (
