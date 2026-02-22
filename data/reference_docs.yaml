@@ -1,0 +1,47 @@
+known_method_doc_urls:
+  NHIS 2019 Questionnaire Redesign: https://www.cdc.gov/nchs/nhis/2019_quest_redesign.htm
+  BLS COVID 19 Misclassification FAQ: https://www.bls.gov/cps/employment-situation-covid19-faq-april-2020.pdf
+  ACS 2020 Experimental Estimates: https://www.census.gov/programs-surveys/acs/technical-documentation/user-notes/2020.html
+  CPI Collection Suspension Documentation: https://www.bls.gov/cpi/covid-19-impact.htm
+  Eurostat EU LFS 2021 Methodology Change: https://ec.europa.eu/eurostat/web/lfs/methodology
+  HICP Imputation Methodology: https://ec.europa.eu/eurostat/documents/10186/10693286/Guidance-on-the-compilation-of-HICP.pdf
+  Eurostat Mortality Revision Policy: https://ec.europa.eu/eurostat/statistics-explained/index.php?title=Excess_mortality_-_statistics
+  ESA 2010 Implementation Guide: https://ec.europa.eu/eurostat/web/esa-2010
+  EU SILC Quality Reports: https://www.cso.ie/en/releasesandpublications/er/silc/surveyonincomeandlivingconditionssilc2016/
+  UNECE Statistical Standards: https://unece.org/statistics/publications
+
+extra_reference_docs:
+  - title: Eurostat LFS New Methodology (2021)
+    doc_type: methodology_note
+    summary: Eurostat explanation of the 2021 EU-LFS methodological transition and comparability guidance.
+    url: https://ec.europa.eu/eurostat/statistics-explained/index.php?title=EU_Labour_Force_Survey_-_new_methodology_from_2021_onwards
+
+  - title: Eurostat Weekly Mortality Metadata
+    doc_type: methodology_note
+    summary: Metadata and revision practices for weekly mortality and excess mortality estimates.
+    url: https://ec.europa.eu/eurostat/cache/metadata/EN/demomwk_esms.htm
+
+  - title: CDC NHIS 2019 Questionnaire Redesign
+    doc_type: validation_paper
+    summary: Primary redesign reference for NHIS comparability caveats.
+    url: https://www.cdc.gov/nchs/nhis/about/2019-questionnaire-redesign.html
+
+  - title: "Federal Reserve: Reconciling Unemployment Claims (COVID)"
+    doc_type: validation_paper
+    summary: Methodology discussion for pandemic-era labor market measurement artifacts.
+    url: https://www.federalreserve.gov/econres/feds/reconciling-unemployment-claims-with-job-losses-in-the-first-months-of-the-covid-19-crisis.htm
+
+  - title: "Census Working Paper: ACS Nonresponse Bias"
+    doc_type: validation_paper
+    summary: Analysis of ACS 2020 pandemic nonresponse distortions.
+    url: https://www.census.gov/library/working-papers/2021/acs/2021_Rothbaum_01.html
+
+  - title: "NBER: CPI Measurement Challenges During COVID"
+    doc_type: validation_paper
+    summary: Research on price-statistics collection constraints and imputation during pandemic shutdowns.
+    url: https://www.nber.org/papers/w27352
+
+  - title: "OUP POQ: Total Survey Error Framework"
+    doc_type: validation_paper
+    summary: Survey error framework used for assessing comparability and redesign impacts.
+    url: https://academic.oup.com/poq/article/74/5/849/1817502

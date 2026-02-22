@@ -1,28 +1,26 @@
-"""pgai vectorizer setup + diagnostics for ALETHEIA embeddings."""
+"""Embedding materialization for ALETHEIA (SurrealDB backend).
+
+No pgai vectorizer worker — embeddings are batch-computed via Ollama
+and written directly to SurrealDB records.
+"""
 
 import argparse
+import asyncio
 import json
 import os
-import subprocess
-import sys
+from typing import Any
 
-import psycopg
+from aletheia.db import get_connection
 
-from aletheia.db import get_db_url, install_pgai
 
 DEFAULT_EMBED_MODEL = "text-embedding-ada-002"
 DEFAULT_EMBED_DIM = 4096
 
 
 def _resolve_embedding_config() -> tuple[str, int, str]:
-    """Resolve embedding model, dimensions, and base URL.
-
-    Checks for a loaded provider config first (via aletheia.yaml endpoints),
-    then falls back to env vars for backward compatibility.
-    """
-    # Try provider-based resolution
+    """Resolve embedding model, dimensions, and base URL."""
     try:
-        from aletheia.providers import _active_embed_endpoint  # noqa: F401
+        from aletheia.providers import _active_embed_endpoint
 
         ep = _active_embed_endpoint()
         if ep is not None:
@@ -38,7 +36,6 @@ def _resolve_embedding_config() -> tuple[str, int, str]:
     except (ImportError, AttributeError):
         pass
 
-    # Fallback: env var resolution (backward compat)
     model = os.environ.get("ALETHEIA_EMBED_MODEL", DEFAULT_EMBED_MODEL)
     try:
         dimensions = int(os.environ.get("ALETHEIA_EMBED_DIM", str(DEFAULT_EMBED_DIM)))
@@ -49,7 +46,7 @@ def _resolve_embedding_config() -> tuple[str, int, str]:
 
 
 def _resolve_embedding_base_url() -> str:
-    """Resolve OpenAI-compatible embedding base URL for pgai."""
+    """Resolve OpenAI-compatible embedding base URL."""
     raw = (
         os.environ.get("ALETHEIA_EMBED_BASE_URL")
         or os.environ.get("ALETHEIA_EMBED_URL")
@@ -62,145 +59,22 @@ def _resolve_embedding_base_url() -> str:
     return f"{base}/v1"
 
 
-def create_vectorizers():
-    """Create pgai vectorizers for all tables that need embeddings.
+async def _embed_batch(texts: list[str], model: str, base_url: str) -> list[list[float]]:
+    """Call the OpenAI-compatible /v1/embeddings endpoint for a batch of texts."""
+    import httpx
 
-    Idempotent -- uses if_not_exists.
-    """
-    install_pgai()
-    model, dimensions, base_url = _resolve_embedding_config()
+    url = f"{base_url}/embeddings"
+    payload = {"input": texts, "model": model}
 
-    with psycopg.connect(get_db_url()) as conn:
-        with conn.cursor() as cur:
-            # Vectorizer for document_chunks: embeds the 'content' column.
-            # pgai creates:
-            #   - document_chunks_embedding_store (table with embeddings)
-            #   - document_chunks_embedding (view joining chunks + embeddings)
-            cur.execute(
-                """
-                SELECT ai.create_vectorizer(
-                    'document_chunks'::regclass,
-                    if_not_exists => true,
-                    loading => ai.loading_column(column_name => 'content'),
-                    embedding => ai.embedding_openai(
-                        %s,
-                        %s,
-                        base_url => %s
-                    ),
-                    chunking => ai.chunking_none(),
-                    formatting => ai.formatting_python_template(
-                        '$chunk'
-                    ),
-                    destination => ai.destination_table(
-                        target_table => 'document_chunks_embedding_store',
-                        view_name => 'document_chunks_embedding'
-                    )
-                )
-                """,
-                (model, dimensions, base_url),
-            )
+    api_key = _resolve_embed_api_key() or "local"
+    headers = {"Authorization": f"Bearer {api_key}"}
 
-            # Vectorizer for methodology_changes: embeds description + impact.
-            # This enables semantic search over methodology break descriptions
-            # without needing them in document_chunks.
-            cur.execute(
-                """
-                SELECT ai.create_vectorizer(
-                    'methodology_changes'::regclass,
-                    if_not_exists => true,
-                    loading => ai.loading_column(column_name => 'description'),
-                    embedding => ai.embedding_openai(
-                        %s,
-                        %s,
-                        base_url => %s
-                    ),
-                    chunking => ai.chunking_none(),
-                    formatting => ai.formatting_python_template(
-                        'methodology change: $chunk'
-                    ),
-                    destination => ai.destination_table(
-                        target_table => 'methodology_changes_embedding_store',
-                        view_name => 'methodology_changes_embedding'
-                    )
-                )
-                """,
-                (model, dimensions, base_url),
-            )
-
-        conn.commit()
-
-    print(f"Vectorizers created (model={model}, dim={dimensions})")
-    print(f"Embedding endpoint: {base_url}")
-    print("Views available: document_chunks_embedding, methodology_changes_embedding")
-
-
-def materialize_embeddings_once(timeout_seconds: int = 600) -> dict[str, object]:
-    """Run one vectorizer-worker pass to materialize pending embeddings."""
-    db_url = get_db_url()
-    commands = [
-        ["pgai", "vectorizer", "worker", "--once", "--db-url", db_url],
-        [sys.executable, "-m", "pgai.vectorizer_worker", "--once", "--db-url", db_url],
-    ]
-    # pgai vectorizer-worker requires OPENAI_API_KEY in its environment even
-    # when targeting local Ollama/LM Studio endpoints that need no key.
-    # Set a placeholder value so the worker doesn't refuse to start.
-    env = {**os.environ}
-    if not env.get("OPENAI_API_KEY"):
-        # Try to get a real key from provider config, fall back to placeholder.
-        api_key = _resolve_embed_api_key()
-        env["OPENAI_API_KEY"] = api_key or "local"
-    attempts: list[dict[str, object]] = []
-
-    for cmd in commands:
-        try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                check=False,
-                env=env,
-            )
-        except FileNotFoundError as exc:
-            attempts.append(
-                {"command": " ".join(cmd), "ok": False, "error": str(exc)}
-            )
-            continue
-        except subprocess.TimeoutExpired as exc:
-            attempts.append(
-                {
-                    "command": " ".join(cmd),
-                    "ok": False,
-                    "error": f"timeout after {timeout_seconds}s",
-                    "stdout_tail": (exc.stdout or "")[-400:],
-                    "stderr_tail": (exc.stderr or "")[-400:],
-                }
-            )
-            continue
-
-        payload = {
-            "command": " ".join(cmd),
-            "ok": proc.returncode == 0,
-            "returncode": proc.returncode,
-            "stdout_tail": (proc.stdout or "")[-600:],
-            "stderr_tail": (proc.stderr or "")[-600:],
-        }
-        attempts.append(payload)
-        if proc.returncode == 0:
-            return {
-                "ok": True,
-                "command": payload["command"],
-                "attempts": attempts,
-            }
-
-    return {
-        "ok": False,
-        "attempts": attempts,
-        "error": (
-            "Unable to run pgai vectorizer worker. "
-            "Install pgai with vectorizer-worker extras."
-        ),
-    }
+    async with httpx.AsyncClient(timeout=120.0, headers=headers) as client:
+        resp = await client.post(url, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        embeddings = [item["embedding"] for item in data["data"]]
+        return embeddings
 
 
 def _resolve_embed_api_key() -> str | None:
@@ -216,58 +90,139 @@ def _resolve_embed_api_key() -> str | None:
     return os.environ.get("ALETHEIA_EMBED_API_KEY") or os.environ.get("ALETHEIA_LLM_API_KEY")
 
 
-def vectorizer_status() -> dict[str, object]:
+def _query_result_rows(result: Any) -> list[dict]:
+    """Extract rows from a SurrealDB query() result."""
+    if not result:
+        return []
+    if isinstance(result, list):
+        for item in result:
+            if isinstance(item, dict):
+                rows = item.get("result", [])
+                if isinstance(rows, list):
+                    return rows
+            elif isinstance(item, list):
+                return item
+        return result if all(isinstance(r, dict) for r in result) else []
+    return []
+
+
+async def materialize_embeddings(
+    batch_size: int = 50,
+    progress_callback: Any = None,
+) -> dict[str, Any]:
+    """Batch-embed all records with missing embeddings.
+
+    Queries unembedded chunks and methodology changes, calls Ollama
+    in batches, and updates the records. Resumable — always queries
+    for records WHERE embedding IS NONE.
+    """
+    model, dimensions, base_url = _resolve_embedding_config()
+    stats: dict[str, Any] = {
+        "ok": False,
+        "model": model,
+        "dim": dimensions,
+        "base_url": base_url,
+        "chunks_embedded": 0,
+        "changes_embedded": 0,
+        "errors": [],
+    }
+
+    try:
+        async with get_connection() as db:
+            # Embed chunks
+            while True:
+                result = await db.query(
+                    f"SELECT * FROM chunk WHERE embedding IS NONE LIMIT {batch_size}"
+                )
+                rows = _query_result_rows(result)
+                if not rows:
+                    break
+
+                texts = [row.get("content", "") for row in rows]
+                ids = [str(row.get("id", "")) for row in rows]
+
+                try:
+                    embeddings = await _embed_batch(texts, model, base_url)
+                except Exception as exc:
+                    stats["errors"].append(f"chunk_embed: {exc}")
+                    break
+
+                for rid, vec in zip(ids, embeddings):
+                    await db.query(
+                        "UPDATE $id SET embedding = $vec",
+                        {"id": rid, "vec": vec},
+                    )
+                stats["chunks_embedded"] += len(rows)
+
+                if progress_callback:
+                    progress_callback(f"Embedded {stats['chunks_embedded']} chunks...")
+
+            # Embed methodology changes
+            while True:
+                result = await db.query(
+                    f"SELECT * FROM methodology_change WHERE embedding IS NONE LIMIT {batch_size}"
+                )
+                rows = _query_result_rows(result)
+                if not rows:
+                    break
+
+                texts = [
+                    f"methodology change: {row.get('description', '')}"
+                    for row in rows
+                ]
+                ids = [str(row.get("id", "")) for row in rows]
+
+                try:
+                    embeddings = await _embed_batch(texts, model, base_url)
+                except Exception as exc:
+                    stats["errors"].append(f"change_embed: {exc}")
+                    break
+
+                for rid, vec in zip(ids, embeddings):
+                    await db.query(
+                        "UPDATE $id SET embedding = $vec",
+                        {"id": rid, "vec": vec},
+                    )
+                stats["changes_embedded"] += len(rows)
+
+                if progress_callback:
+                    progress_callback(f"Embedded {stats['changes_embedded']} changes...")
+
+        stats["ok"] = not stats["errors"]
+    except Exception as exc:
+        stats["errors"].append(str(exc))
+
+    return stats
+
+
+async def vectorizer_status() -> dict[str, Any]:
     """Report semantic index readiness and embedding coverage."""
     model, dimensions, base_url = _resolve_embedding_config()
-    with psycopg.connect(get_db_url()) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT EXISTS(
-                    SELECT 1
-                    FROM information_schema.views
-                    WHERE table_schema = 'public' AND table_name = 'document_chunks_embedding'
-                ) AS doc_view,
-                EXISTS(
-                    SELECT 1
-                    FROM information_schema.views
-                    WHERE table_schema = 'public' AND table_name = 'methodology_changes_embedding'
-                ) AS break_view,
-                EXISTS(
-                    SELECT 1
-                    FROM information_schema.tables
-                    WHERE table_schema = 'public' AND table_name = 'document_chunks_embedding_store'
-                ) AS doc_store,
-                EXISTS(
-                    SELECT 1
-                    FROM information_schema.tables
-                    WHERE table_schema = 'public' AND table_name = 'methodology_changes_embedding_store'
-                ) AS break_store
-                """
-            )
-            flags = cur.fetchone()
 
-            doc_embeddings = 0
-            break_embeddings = 0
-            doc_chunks = 0
-            method_changes = 0
+    async with get_connection() as db:
+        chunk_result = await db.query("SELECT count() AS total FROM chunk GROUP ALL")
+        chunk_rows = _query_result_rows(chunk_result)
+        doc_chunks = int(chunk_rows[0].get("total", 0)) if chunk_rows else 0
 
-            cur.execute("SELECT COUNT(*) FROM document_chunks")
-            doc_chunks = int(cur.fetchone()[0])
+        mc_result = await db.query("SELECT count() AS total FROM methodology_change GROUP ALL")
+        mc_rows = _query_result_rows(mc_result)
+        method_changes = int(mc_rows[0].get("total", 0)) if mc_rows else 0
 
-            cur.execute("SELECT COUNT(*) FROM methodology_changes")
-            method_changes = int(cur.fetchone()[0])
+        chunk_embed_result = await db.query(
+            "SELECT count() AS total FROM chunk WHERE embedding IS NOT NONE GROUP ALL"
+        )
+        ce_rows = _query_result_rows(chunk_embed_result)
+        doc_embeddings = int(ce_rows[0].get("total", 0)) if ce_rows else 0
 
-            if flags and bool(flags[0]):
-                cur.execute("SELECT COUNT(*) FROM document_chunks_embedding")
-                doc_embeddings = int(cur.fetchone()[0])
-            if flags and bool(flags[1]):
-                cur.execute("SELECT COUNT(*) FROM methodology_changes_embedding")
-                break_embeddings = int(cur.fetchone()[0])
+        mc_embed_result = await db.query(
+            "SELECT count() AS total FROM methodology_change WHERE embedding IS NOT NONE GROUP ALL"
+        )
+        me_rows = _query_result_rows(mc_embed_result)
+        method_embeddings = int(me_rows[0].get("total", 0)) if me_rows else 0
 
     doc_ready = doc_chunks == 0 or doc_embeddings > 0
-    break_ready = method_changes == 0 or break_embeddings > 0
-    semantic_ready = bool(flags and flags[0] and flags[1] and doc_ready and break_ready)
+    break_ready = method_changes == 0 or method_embeddings > 0
+    semantic_ready = doc_ready and break_ready
 
     return {
         "embedding_model": model,
@@ -276,33 +231,30 @@ def vectorizer_status() -> dict[str, object]:
         "document_chunks": doc_chunks,
         "methodology_changes": method_changes,
         "document_embeddings": doc_embeddings,
-        "methodology_embeddings": break_embeddings,
-        "document_embedding_view": bool(flags and flags[0]),
-        "methodology_embedding_view": bool(flags and flags[1]),
-        "document_embedding_store": bool(flags and flags[2]),
-        "methodology_embedding_store": bool(flags and flags[3]),
+        "methodology_embeddings": method_embeddings,
         "semantic_search_ready": semantic_ready,
     }
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Create pgai vectorizers and inspect status.")
+    parser = argparse.ArgumentParser(description="Materialize embeddings and inspect status.")
     parser.add_argument(
         "--status-only",
         action="store_true",
-        help="Only print vectorizer status, do not create/update vectorizers.",
+        help="Only print vectorizer status.",
     )
     parser.add_argument(
-        "--materialize-once",
+        "--materialize",
         action="store_true",
-        help="Run one vectorizer-worker pass after creating vectorizers.",
+        help="Run embedding materialization.",
     )
     args = parser.parse_args()
 
-    if not args.status_only:
-        create_vectorizers()
-    payload: dict[str, object] = {"status": vectorizer_status()}
-    if args.materialize_once:
-        payload["materialize"] = materialize_embeddings_once()
-        payload["status"] = vectorizer_status()
-    print(json.dumps(payload, indent=2))
+    async def _main():
+        payload: dict[str, object] = {"status": await vectorizer_status()}
+        if args.materialize and not args.status_only:
+            payload["materialize"] = await materialize_embeddings()
+            payload["status"] = await vectorizer_status()
+        print(json.dumps(payload, indent=2))
+
+    asyncio.run(_main())

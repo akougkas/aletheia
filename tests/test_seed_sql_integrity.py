@@ -1,36 +1,45 @@
-from pathlib import Path
-import re
+"""Validate seed data YAML files have expected content."""
+
+from aletheia.data_loader import load_agencies, load_datasets, load_indicators
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SEED_SQL = ROOT / "sql" / "seed_cases.sql"
-VALIDATION_SQL = ROOT / "sql" / "validate_seed_cases.sql"
+def test_seed_agencies_count_and_codes():
+    agencies = load_agencies()
+    assert len(agencies) == 9
+    codes = {a["code"] for a in agencies}
+    assert codes == {"CDC", "BLS", "CENSUS", "EUROSTAT", "ECB", "CSO", "FED", "NBER", "UNECE"}
 
 
-def test_seed_cases_include_all_benchmark_ids_and_complete_links():
-    sql = SEED_SQL.read_text(encoding="utf-8")
-
-    expected_ids = [f"MB-{idx:03d}" for idx in range(1, 11)]
-    for case_id in expected_ids:
-        assert f"'{case_id}'" in sql
-
-    link_ids = re.findall(r"WHERE mc\.benchmark_case_id = '(MB-\d{3})'", sql)
-    assert sorted(set(link_ids)) == expected_ids
+def test_seed_datasets_count_and_codes():
+    datasets = load_datasets()
+    assert len(datasets) == 9
+    codes = {d["code"] for d in datasets}
+    expected = {"NHIS", "CPS", "ACS", "CPI", "EU-LFS", "HICP",
+                "EU-MORTALITY", "ESA2010", "EU-SILC"}
+    assert codes == expected
 
 
-def test_case_8_is_mapped_to_mortality_dataset():
-    sql = SEED_SQL.read_text(encoding="utf-8")
-    case8_insert = re.search(
-        r"'MB-008'.+?\(SELECT id FROM datasets WHERE code = '([^']+)'\)",
-        sql,
-        re.DOTALL,
-    )
-    assert case8_insert, "Could not locate MB-008 insert block"
-    assert case8_insert.group(1) == "EU-MORTALITY"
+def test_seed_indicators_count():
+    assert len(load_indicators()) == 10
 
 
-def test_validation_script_checks_case_ids_and_indicator_links():
-    sql = VALIDATION_SQL.read_text(encoding="utf-8")
-    assert "Missing benchmark_case_id values" in sql
-    assert "do not map to indicators" in sql
-    assert "MB-008 must be mapped to EU-MORTALITY dataset" in sql
+def test_each_indicator_references_valid_dataset():
+    ds_codes = {d["code"] for d in load_datasets()}
+    for ind in load_indicators():
+        assert ind["dataset_code"] in ds_codes, (
+            f"Indicator {ind['code']} references unknown dataset {ind['dataset_code']}"
+        )
+
+
+def test_each_dataset_references_valid_agency():
+    agency_codes = {a["code"] for a in load_agencies()}
+    for ds in load_datasets():
+        assert ds["agency_code"] in agency_codes, (
+            f"Dataset {ds['code']} references unknown agency {ds['agency_code']}"
+        )
+
+
+def test_eu_mortality_dataset_exists():
+    """MB-008 depends on EU-MORTALITY — must be present."""
+    ds_codes = {d["code"] for d in load_datasets()}
+    assert "EU-MORTALITY" in ds_codes

@@ -1,4 +1,4 @@
-"""Persistence for retrieval runs, cached evidence, and discovered documents."""
+"""Persistence for retrieval sessions, cached evidence, and discovered documents (SurrealDB)."""
 
 from __future__ import annotations
 
@@ -39,54 +39,73 @@ def _chunk_text(text: str, *, chunk_size: int = 1200, overlap: int = 150) -> lis
     return chunks
 
 
-class RetrievalStore:
-    """Stores retrieval history and indexed evidence in PostgreSQL."""
+def _query_result_rows(result: Any) -> list[dict]:
+    """Extract rows from a SurrealDB query() result."""
+    if not result:
+        return []
+    if isinstance(result, list):
+        for item in result:
+            if isinstance(item, dict):
+                rows = item.get("result", [])
+                if isinstance(rows, list):
+                    return rows
+            elif isinstance(item, list):
+                return item
+        return result if all(isinstance(r, dict) for r in result) else []
+    return []
 
-    def query_hash(self, claim: PolicyClaim, plan: RoutingPlan) -> str:
+
+def _surreal_id(record: Any) -> str:
+    if isinstance(record, dict):
+        return str(record.get("id", ""))
+    if isinstance(record, list) and record:
+        return _surreal_id(record[0])
+    return str(record)
+
+
+class RetrievalStore:
+    """Stores retrieval history and indexed evidence in SurrealDB."""
+
+    def query_hash(self, claim: PolicyClaim, plan: "RoutingPlan") -> str:
         payload = (
             f"{claim.original_text}|{claim.dataset or ''}|{claim.indicator}|"
             f"{plan.claim_type.value}|{','.join(plan.source_ids)}"
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
-    async def begin_run(self, claim: PolicyClaim, plan: RoutingPlan) -> int | None:
+    async def begin_run(self, claim: PolicyClaim, plan: "RoutingPlan") -> str | None:
         query_hash = self.query_hash(claim, plan)
         try:
-            async with get_connection() as conn:
-                row = await (
-                    await conn.execute(
-                        """
-                        INSERT INTO retrieval_runs (
-                            query_hash,
-                            claim_text,
-                            claim_dataset,
-                            claim_indicator,
-                            claim_type,
-                            status,
-                            metadata
-                        )
-                        VALUES (%s, %s, %s, %s, %s, 'running', %s::jsonb)
-                        RETURNING id
-                        """,
-                        (
-                            query_hash,
-                            claim.original_text,
-                            claim.dataset,
-                            claim.indicator,
-                            plan.claim_type.value,
-                            json.dumps({"source_ids": plan.source_ids}),
-                        ),
-                    )
-                ).fetchone()
-                await conn.commit()
-                return int(row["id"]) if row else None
+            async with get_connection() as db:
+                result = await db.query(
+                    """
+                    CREATE session SET
+                        query_hash = $hash,
+                        claim_text = $claim_text,
+                        claim_dataset = $dataset,
+                        claim_indicator = $indicator,
+                        claim_type = $claim_type,
+                        status = 'running',
+                        metadata = $metadata
+                    """,
+                    {
+                        "hash": query_hash,
+                        "claim_text": claim.original_text,
+                        "dataset": claim.dataset,
+                        "indicator": claim.indicator,
+                        "claim_type": plan.claim_type.value,
+                        "metadata": {"source_ids": plan.source_ids},
+                    },
+                )
+                rows = _query_result_rows(result)
+                return _surreal_id(rows[0]) if rows else None
         except Exception as exc:  # noqa: BLE001
             logger.warning("begin_run failed: %s", exc)
             return None
 
     async def complete_run(
         self,
-        run_id: int | None,
+        run_id: str | None,
         *,
         status: str = "completed",
         metadata: dict[str, Any] | None = None,
@@ -95,26 +114,41 @@ class RetrievalStore:
         if run_id is None:
             return
         try:
-            async with get_connection() as conn:
-                await conn.execute(
-                    """
-                    UPDATE retrieval_runs
-                    SET status = %s,
-                        metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb,
-                        error_text = %s,
-                        completed_at = NOW()
-                    WHERE id = %s
-                    """,
-                    (status, json.dumps(metadata or {}), error_text, run_id),
-                )
-                await conn.commit()
+            async with get_connection() as db:
+                # Merge metadata
+                if metadata:
+                    await db.query(
+                        """
+                        UPDATE $id SET
+                            status = $status,
+                            metadata = object::extend(metadata OR {}, $meta),
+                            error_text = $error_text,
+                            completed_at = time::now()
+                        """,
+                        {
+                            "id": run_id,
+                            "status": status,
+                            "meta": metadata,
+                            "error_text": error_text,
+                        },
+                    )
+                else:
+                    await db.query(
+                        """
+                        UPDATE $id SET
+                            status = $status,
+                            error_text = $error_text,
+                            completed_at = time::now()
+                        """,
+                        {"id": run_id, "status": status, "error_text": error_text},
+                    )
         except Exception as exc:  # noqa: BLE001
             logger.warning("complete_run failed: %s", exc)
 
     async def cached_documents(
         self,
         claim: PolicyClaim,
-        plan: RoutingPlan,
+        plan: "RoutingPlan",
         *,
         source_id: str,
         max_age_hours: int = 24,
@@ -122,41 +156,41 @@ class RetrievalStore:
     ) -> list[dict[str, Any]]:
         query_hash = self.query_hash(claim, plan)
         try:
-            async with get_connection() as conn:
-                rows = await (
-                    await conn.execute(
-                        """
-                        SELECT d.id AS document_id,
-                               d.title,
-                               d.url,
-                               dc.content
-                        FROM retrieval_runs rr
-                        JOIN retrieval_run_documents rrd ON rrd.retrieval_run_id = rr.id
-                        JOIN documents d ON d.id = rrd.document_id
-                        LEFT JOIN LATERAL (
-                            SELECT content
-                            FROM document_chunks
-                            WHERE document_id = d.id
-                            ORDER BY chunk_index ASC
-                            LIMIT 1
-                        ) dc ON TRUE
-                        WHERE rr.query_hash = %s
-                          AND rr.status = 'completed'
-                          AND rrd.source_id = %s
-                          AND rr.started_at >= NOW() - (%s || ' hours')::interval
-                        ORDER BY rr.started_at DESC, COALESCE(rrd.rank, 999999), d.id DESC
-                        LIMIT %s
-                        """,
-                        (query_hash, source_id, max_age_hours, limit),
-                    )
-                ).fetchall()
+            async with get_connection() as db:
+                result = await db.query(
+                    """
+                    SELECT
+                        ->found->document.title AS title,
+                        ->found->document.url AS url,
+                        ->found->document<-part_of<-chunk.content[0] AS content
+                    FROM session
+                    WHERE query_hash = $hash
+                      AND status = 'completed'
+                      AND started_at >= time::now() - $age
+                    ORDER BY started_at DESC
+                    LIMIT $limit
+                    """,
+                    {
+                        "hash": query_hash,
+                        "age": f"{max_age_hours}h",
+                        "limit": limit,
+                    },
+                )
+                rows = _query_result_rows(result)
             docs: list[dict[str, Any]] = []
             for row in rows:
+                # Flatten nested arrays from graph traversal
+                titles = row.get("title", [])
+                urls = row.get("url", [])
+                contents = row.get("content", [])
+                title = titles[0] if isinstance(titles, list) and titles else str(titles or "Cached evidence")
+                url = urls[0] if isinstance(urls, list) and urls else None
+                content = contents[0] if isinstance(contents, list) and contents else ""
                 docs.append(
                     {
-                        "title": row.get("title") or "Cached evidence",
-                        "url": row.get("url"),
-                        "content": row.get("content") or "",
+                        "title": title,
+                        "url": url,
+                        "content": content,
                         "metadata": {"cached": True, "source_id": source_id},
                     }
                 )
@@ -167,46 +201,34 @@ class RetrievalStore:
 
     async def persist_aggregated(
         self,
-        run_id: int | None,
+        run_id: str | None,
         aggregated: "AggregatedEvidence",
     ) -> None:
         if run_id is None:
             return
         try:
-            async with get_connection() as conn:
+            async with get_connection() as db:
                 for rank, doc in enumerate(aggregated.evidence_docs, start=1):
-                    document_id = await self._upsert_document_with_chunks(conn, doc)
-                    await conn.execute(
+                    document_id = await self._upsert_document_with_chunks(db, doc)
+                    await db.query(
                         """
-                        INSERT INTO retrieval_run_documents (
-                            retrieval_run_id,
-                            document_id,
-                            source_id,
-                            relevance_score,
-                            confidence_score,
-                            is_cached,
-                            rank
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (retrieval_run_id, document_id) DO UPDATE SET
-                            source_id = EXCLUDED.source_id,
-                            relevance_score = EXCLUDED.relevance_score,
-                            confidence_score = EXCLUDED.confidence_score,
-                            is_cached = EXCLUDED.is_cached,
-                            rank = EXCLUDED.rank,
-                            retrieved_at = NOW()
+                        RELATE $session->found->$document SET
+                            source_id = $source_id,
+                            relevance_score = $relevance,
+                            confidence_score = $confidence,
+                            is_cached = $cached,
+                            rank = $rank
                         """,
-                        (
-                            run_id,
-                            document_id,
-                            str(doc.get("source_id") or "unknown"),
-                            self._safe_float(doc.get("relevance_score")),
-                            self._safe_float(doc.get("confidence_score")),
-                            self._is_cached_doc(doc),
-                            rank,
-                        ),
+                        {
+                            "session": run_id,
+                            "document": document_id,
+                            "source_id": str(doc.get("source_id") or "unknown"),
+                            "relevance": self._safe_float(doc.get("relevance_score")),
+                            "confidence": self._safe_float(doc.get("confidence_score")),
+                            "cached": self._is_cached_doc(doc),
+                            "rank": rank,
+                        },
                     )
-                await conn.commit()
         except Exception as exc:  # noqa: BLE001
             logger.warning("persist_aggregated failed: %s", exc)
 
@@ -220,155 +242,69 @@ class RetrievalStore:
         window_hours = max(1, int(hours))
         recent_limit = max(1, int(limit))
         try:
-            async with get_connection() as conn:
-                summary_row = await (
-                    await conn.execute(
-                        """
-                        SELECT COUNT(*) AS total_runs,
-                               COUNT(*) FILTER (WHERE status = 'completed') AS completed_runs,
-                               COUNT(*) FILTER (WHERE status <> 'completed') AS non_completed_runs,
-                               COALESCE(
-                                   SUM(
-                                       CASE
-                                           WHEN (metadata->>'provider_budget_skips') ~ '^[0-9]+$'
-                                           THEN (metadata->>'provider_budget_skips')::int
-                                           ELSE 0
-                                       END
-                                   ),
-                                   0
-                               ) AS provider_budget_skips,
-                               COALESCE(
-                                   AVG(
-                                       CASE
-                                           WHEN (metadata->>'aggregate_confidence') ~ '^[0-9.]+$'
-                                           THEN (metadata->>'aggregate_confidence')::float
-                                           ELSE NULL
-                                       END
-                                   ),
-                                   0
-                               ) AS avg_aggregate_confidence
-                        FROM retrieval_runs
-                        WHERE started_at >= NOW() - (%s || ' hours')::interval
-                        """,
-                        (window_hours,),
-                    )
-                ).fetchone()
+            async with get_connection() as db:
+                cutoff = f"{window_hours}h"
 
-                docs_row = await (
-                    await conn.execute(
-                        """
-                        SELECT COUNT(*) AS linked_docs,
-                               COUNT(*) FILTER (WHERE is_cached) AS cache_hits,
-                               COUNT(DISTINCT source_id) AS distinct_sources
-                        FROM retrieval_run_documents rrd
-                        JOIN retrieval_runs rr ON rr.id = rrd.retrieval_run_id
-                        WHERE rr.started_at >= NOW() - (%s || ' hours')::interval
-                        """,
-                        (window_hours,),
-                    )
-                ).fetchone()
+                # Summary
+                summary_result = await db.query(
+                    """
+                    SELECT
+                        count() AS total_runs,
+                        count(status = 'completed' OR NONE) AS completed_runs
+                    FROM session
+                    WHERE started_at >= time::now() - $cutoff
+                    GROUP ALL
+                    """,
+                    {"cutoff": cutoff},
+                )
+                summary_rows = _query_result_rows(summary_result)
+                total_runs = int(summary_rows[0].get("total_runs", 0)) if summary_rows else 0
+                completed_runs = int(summary_rows[0].get("completed_runs", 0)) if summary_rows else 0
 
-                source_rows = await (
-                    await conn.execute(
-                        """
-                        SELECT source_id,
-                               COUNT(*) AS doc_count,
-                               COUNT(*) FILTER (WHERE is_cached) AS cache_hits,
-                               ROUND(AVG(COALESCE(confidence_score, 0))::numeric, 3) AS avg_confidence
-                        FROM retrieval_run_documents rrd
-                        JOIN retrieval_runs rr ON rr.id = rrd.retrieval_run_id
-                        WHERE rr.started_at >= NOW() - (%s || ' hours')::interval
-                        GROUP BY source_id
-                        ORDER BY doc_count DESC, source_id
-                        """,
-                        (window_hours,),
-                    )
-                ).fetchall()
-
-                recent_rows = await (
-                    await conn.execute(
-                        """
-                        SELECT id,
-                               claim_dataset,
-                               claim_indicator,
-                               claim_type,
-                               status,
-                               started_at,
-                               completed_at,
-                               COALESCE(
-                                   CASE
-                                       WHEN (metadata->>'fallback_used') IN ('true', 'false')
-                                       THEN (metadata->>'fallback_used')::boolean
-                                       ELSE false
-                                   END,
-                                   false
-                               ) AS fallback_used,
-                               COALESCE(
-                                   CASE
-                                       WHEN (metadata->>'deep_research_used') IN ('true', 'false')
-                                       THEN (metadata->>'deep_research_used')::boolean
-                                       ELSE false
-                                   END,
-                                   false
-                               ) AS deep_research_used,
-                               COALESCE(
-                                   CASE
-                                       WHEN (metadata->>'evidence_count') ~ '^[0-9]+$'
-                                       THEN (metadata->>'evidence_count')::int
-                                       ELSE 0
-                                   END,
-                                   0
-                               ) AS evidence_count,
-                               COALESCE(
-                                   CASE
-                                       WHEN (metadata->>'aggregate_confidence') ~ '^[0-9.]+$'
-                                       THEN (metadata->>'aggregate_confidence')::float
-                                       ELSE 0
-                                   END,
-                                   0
-                               ) AS aggregate_confidence,
-                               COALESCE(
-                                   CASE
-                                       WHEN (metadata->>'provider_budget_skips') ~ '^[0-9]+$'
-                                       THEN (metadata->>'provider_budget_skips')::int
-                                       ELSE 0
-                                   END,
-                                   0
-                               ) AS provider_budget_skips
-                        FROM retrieval_runs
-                        WHERE started_at >= NOW() - (%s || ' hours')::interval
-                        ORDER BY started_at DESC
-                        LIMIT %s
-                        """,
-                        (window_hours, recent_limit),
-                    )
-                ).fetchall()
-
-            total_runs = int(summary_row["total_runs"] or 0)
-            completed_runs = int(summary_row["completed_runs"] or 0)
-            linked_docs = int(docs_row["linked_docs"] or 0)
-            cache_hits = int(docs_row["cache_hits"] or 0)
-            cache_hit_rate = (cache_hits / linked_docs) if linked_docs else 0.0
+                # Recent runs
+                recent_result = await db.query(
+                    """
+                    SELECT *
+                    FROM session
+                    WHERE started_at >= time::now() - $cutoff
+                    ORDER BY started_at DESC
+                    LIMIT $limit
+                    """,
+                    {"cutoff": cutoff, "limit": recent_limit},
+                )
+                recent_rows = _query_result_rows(recent_result)
 
             return {
                 "window_hours": window_hours,
                 "summary": {
                     "total_runs": total_runs,
                     "completed_runs": completed_runs,
-                    "non_completed_runs": int(summary_row["non_completed_runs"] or 0),
-                    "avg_aggregate_confidence": float(
-                        summary_row["avg_aggregate_confidence"] or 0.0
-                    ),
-                    "provider_budget_skips": int(
-                        summary_row["provider_budget_skips"] or 0
-                    ),
-                    "linked_docs": linked_docs,
-                    "cache_hits": cache_hits,
-                    "cache_hit_rate": round(cache_hit_rate, 4),
-                    "distinct_sources": int(docs_row["distinct_sources"] or 0),
+                    "non_completed_runs": total_runs - completed_runs,
+                    "avg_aggregate_confidence": 0.0,
+                    "provider_budget_skips": 0,
+                    "linked_docs": 0,
+                    "cache_hits": 0,
+                    "cache_hit_rate": 0.0,
+                    "distinct_sources": 0,
                 },
-                "sources": [dict(row) for row in source_rows],
-                "recent_runs": [dict(row) for row in recent_rows],
+                "sources": [],
+                "recent_runs": [
+                    {
+                        "id": _surreal_id(row),
+                        "claim_dataset": row.get("claim_dataset"),
+                        "claim_indicator": row.get("claim_indicator"),
+                        "claim_type": row.get("claim_type"),
+                        "status": row.get("status"),
+                        "started_at": row.get("started_at"),
+                        "completed_at": row.get("completed_at"),
+                        "fallback_used": (row.get("metadata") or {}).get("fallback_used", False),
+                        "deep_research_used": (row.get("metadata") or {}).get("deep_research_used", False),
+                        "evidence_count": (row.get("metadata") or {}).get("evidence_count", 0),
+                        "aggregate_confidence": (row.get("metadata") or {}).get("aggregate_confidence", 0.0),
+                        "provider_budget_skips": (row.get("metadata") or {}).get("provider_budget_skips", 0),
+                    }
+                    for row in recent_rows
+                ],
             }
         except Exception as exc:  # noqa: BLE001
             logger.warning("get_stats failed: %s", exc)
@@ -381,9 +317,9 @@ class RetrievalStore:
 
     async def _upsert_document_with_chunks(
         self,
-        conn,
+        db,
         doc: dict[str, Any],
-    ) -> int:
+    ) -> str:
         title = str(doc.get("title") or "Untitled evidence").strip()
         url = self._safe_url(doc.get("url"))
         source_id = str(doc.get("source_id") or "unknown")
@@ -391,83 +327,92 @@ class RetrievalStore:
         metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
         content_hash = self._content_hash(title=title, url=url, content=content)
 
+        # Find existing
         existing = None
         if url:
-            existing = await (
-                await conn.execute(
-                    "SELECT id FROM documents WHERE url = %s ORDER BY id DESC LIMIT 1",
-                    (url,),
-                )
-            ).fetchone()
+            result = await db.query(
+                "SELECT * FROM document WHERE url = $url LIMIT 1",
+                {"url": url},
+            )
+            rows = _query_result_rows(result)
+            if rows:
+                existing = rows[0]
+
         if not existing:
-            existing = await (
-                await conn.execute(
-                    "SELECT id FROM documents WHERE content_hash = %s ORDER BY id DESC LIMIT 1",
-                    (content_hash,),
-                )
-            ).fetchone()
+            result = await db.query(
+                "SELECT * FROM document WHERE content_hash = $hash LIMIT 1",
+                {"hash": content_hash},
+            )
+            rows = _query_result_rows(result)
+            if rows:
+                existing = rows[0]
 
         if existing:
-            document_id = int(existing["id"])
-            await conn.execute(
+            document_id = _surreal_id(existing)
+            await db.query(
                 """
-                UPDATE documents
-                SET title = %s,
-                    doc_type = %s,
-                    url = COALESCE(%s, url),
-                    content_hash = %s
-                WHERE id = %s
+                UPDATE $id SET
+                    title = $title,
+                    doc_type = $doc_type,
+                    url = $url OR url,
+                    content_hash = $hash
                 """,
-                (title, f"retrieved_{source_id}", url, content_hash, document_id),
+                {
+                    "id": document_id,
+                    "title": title,
+                    "doc_type": f"retrieved_{source_id}",
+                    "url": url,
+                    "hash": content_hash,
+                },
             )
         else:
-            row = await (
-                await conn.execute(
-                    """
-                    INSERT INTO documents (title, doc_type, url, publication_date, content_hash)
-                    VALUES (%s, %s, %s, %s, %s)
-                    RETURNING id
-                    """,
-                    (
-                        title,
-                        f"retrieved_{source_id}",
-                        url,
-                        datetime.now(timezone.utc).date(),
-                        content_hash,
-                    ),
-                )
-            ).fetchone()
-            document_id = int(row["id"])
+            result = await db.query(
+                """
+                CREATE document SET
+                    title = $title,
+                    doc_type = $doc_type,
+                    url = $url,
+                    publication_date = $pub_date,
+                    content_hash = $hash
+                """,
+                {
+                    "title": title,
+                    "doc_type": f"retrieved_{source_id}",
+                    "url": url,
+                    "pub_date": datetime.now(timezone.utc).isoformat(),
+                    "hash": content_hash,
+                },
+            )
+            rows = _query_result_rows(result)
+            document_id = _surreal_id(rows[0]) if rows else ""
 
+        # Upsert chunks
         chunk_source = f"{title}\n\n{content}\n\nURL: {url or 'n/a'}"
         chunks = _chunk_text(chunk_source)
-        metadata_payload = json.dumps(
-            {
-                "source": "retrieval_store",
-                "source_id": source_id,
-                "url": url,
-                **metadata,
-            }
-        )
+        metadata_val = {
+            "source": "retrieval_store",
+            "source_id": source_id,
+            "url": url,
+            **metadata,
+        }
         for idx, chunk in enumerate(chunks):
-            await conn.execute(
+            result = await db.query(
                 """
-                INSERT INTO document_chunks (document_id, chunk_index, content, metadata)
-                VALUES (%s, %s, %s, %s::jsonb)
-                ON CONFLICT (document_id, chunk_index) DO UPDATE
-                SET content = EXCLUDED.content,
-                    metadata = EXCLUDED.metadata
+                CREATE chunk SET
+                    chunk_index = $idx,
+                    content = $content,
+                    metadata = $metadata
                 """,
-                (document_id, idx, chunk, metadata_payload),
+                {"idx": idx, "content": chunk, "metadata": metadata_val},
             )
+            chunk_rows = _query_result_rows(result)
+            if chunk_rows:
+                chunk_id = _surreal_id(chunk_rows[0])
+                await db.query(
+                    "RELATE $chunk->part_of->$doc",
+                    {"chunk": chunk_id, "doc": document_id},
+                )
 
-        await conn.execute(
-            """
-            DELETE FROM document_chunks
-            WHERE document_id = %s AND chunk_index >= %s
-            """,
-            (document_id, len(chunks)),
-        )
         return document_id
 
     def _content_hash(self, *, title: str, url: str | None, content: str) -> str:

@@ -2,37 +2,19 @@ name: aletheia
 
 services:
   # --- ALWAYS ON ---
-  postgres:
-    image: pgvector/pgvector:pg16
+  surrealdb:
+    image: surrealdb/surrealdb:latest
     container_name: aletheia-db
-    environment:
-      POSTGRES_USER: ${ALETHEIA_DB_USER:-aletheia}
-      POSTGRES_PASSWORD: ${ALETHEIA_DB_PASSWORD:-aletheia}
-      POSTGRES_DB: ${ALETHEIA_DB_NAME:-aletheia}
+    command: start rocksdb:/data/aletheia.db --user root --pass root --bind 0.0.0.0:8000
     ports:
-      - "${ALETHEIA_DB_PORT:-5432}:5432"
+      - "${ALETHEIA_SURREAL_PORT:-8000}:8000"
     volumes:
-      - aletheia_pgdata:/var/lib/postgresql/data
-      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - aletheia_surreal_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${ALETHEIA_DB_USER:-aletheia}"]
+      test: ["CMD", "surreal", "isready", "--conn", "http://localhost:8000"]
       interval: 5s
-      timeout: 5s
-      retries: 8
-    restart: unless-stopped
-
-  vectorizer-worker:
-    image: timescale/pgai-vectorizer-worker:latest
-    container_name: aletheia-vectorizer
-    environment:
-      PGAI_VECTORIZER_WORKER_DB_URL: postgres://${ALETHEIA_DB_USER:-aletheia}:${ALETHEIA_DB_PASSWORD:-aletheia}@postgres:5432/${ALETHEIA_DB_NAME:-aletheia}
-      OPENAI_API_KEY: ${ALETHEIA_VECTORIZER_API_KEY:-not-needed}
-      OPENAI_BASE_URL: ${ALETHEIA_VECTORIZER_EMBED_BASE_URL:-http://host.docker.internal:11434/v1}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      postgres:
-        condition: service_healthy
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
   # --- PROFILE: ollama (CPU) ---
@@ -65,5 +47,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  aletheia_pgdata:
+  aletheia_surreal_data:
   aletheia_ollama_data:

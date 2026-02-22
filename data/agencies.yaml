@@ -1,0 +1,53 @@
+- code: CDC
+  name: Centers for Disease Control and Prevention
+  country: USA
+  url: https://www.cdc.gov
+  domains: [cdc.gov]
+
+- code: BLS
+  name: Bureau of Labor Statistics
+  country: USA
+  url: https://www.bls.gov
+  domains: [bls.gov]
+
+- code: CENSUS
+  name: U.S. Census Bureau
+  country: USA
+  url: https://www.census.gov
+  domains: [census.gov]
+
+- code: EUROSTAT
+  name: European Statistical Office
+  country: EU
+  url: https://ec.europa.eu/eurostat
+  domains: [ec.europa.eu]
+
+- code: ECB
+  name: European Central Bank
+  country: EU
+  url: https://www.ecb.europa.eu
+  domains: [ecb.europa.eu]
+
+- code: CSO
+  name: Central Statistics Office
+  country: Ireland
+  url: https://www.cso.ie
+  domains: [cso.ie]
+
+- code: FED
+  name: Board of Governors of the Federal Reserve System
+  country: USA
+  url: https://www.federalreserve.gov
+  domains: [federalreserve.gov]
+
+- code: NBER
+  name: National Bureau of Economic Research
+  country: USA
+  url: https://www.nber.org
+  domains: [nber.org]
+
+- code: UNECE
+  name: United Nations Economic Commission for Europe
+  country: INTL
+  url: https://unece.org
+  domains: [unece.org]

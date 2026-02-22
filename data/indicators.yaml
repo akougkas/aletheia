@@ -1,0 +1,59 @@
+- dataset_code: NHIS
+  code: ECIGARETTE_ADULT
+  name: Adult e-cigarette use
+  unit: percent
+  description: Percentage of adults who currently use e-cigarettes
+
+- dataset_code: NHIS
+  code: AFFORD_MEDICAL
+  name: Unable to afford medical care
+  unit: percent
+  description: Percentage of adults who could not afford needed medical care
+
+- dataset_code: CPS
+  code: UNEMPLOYMENT_RATE
+  name: Unemployment rate
+  unit: percent
+  description: Percentage of labor force that is unemployed
+
+- dataset_code: ACS
+  code: MEDIAN_HH_INCOME
+  name: Real median household income
+  unit: dollars
+  description: Inflation-adjusted median household income
+
+- dataset_code: CPI
+  code: CPI_ALL
+  name: CPI All Items
+  unit: index
+  description: Consumer Price Index for All Urban Consumers
+
+- dataset_code: EU-LFS
+  code: EU_UNEMPLOYMENT
+  name: EU unemployment rate
+  unit: percent
+  description: Unemployment rate for EU member states
+
+- dataset_code: HICP
+  code: HICP_ALL
+  name: HICP All Items
+  unit: index
+  description: Harmonised Index of Consumer Prices
+
+- dataset_code: EU-MORTALITY
+  code: EXCESS_MORTALITY
+  name: Excess mortality
+  unit: percent
+  description: Deviation from expected mortality after delayed registrations and revisions
+
+- dataset_code: ESA2010
+  code: GDP_LEVEL
+  name: GDP level
+  unit: euros
+  description: Gross Domestic Product level
+
+- dataset_code: EU-SILC
+  code: AROP_RATE
+  name: At-risk-of-poverty rate
+  unit: percent
+  description: Share of population with income below 60% of national median

@@ -1,0 +1,519 @@
+- benchmark_case_id: PH3-001
+  dataset_code: CPS
+  indicator_code: UNEMPLOYMENT_RATE
+  change_type: questionnaire_redesign
+  effective_date: "1994-01-01"
+  description: CPS survey redesign in 1994 introduced computer-assisted interviewing and revised labor force items.
+  impact_estimate: Introduced a documented historical series break in several labor-force measures.
+  severity: major
+  comparability: not_comparable
+  source_url: https://www.bls.gov/cps/documentation.htm
+  impact_direction: unknown
+  impact_magnitude: "Historical break; bridge tables required"
+
+- benchmark_case_id: PH3-002
+  dataset_code: CPS
+  indicator_code: UNEMPLOYMENT_RATE
+  change_type: sample_redesign
+  effective_date: "2003-01-01"
+  description: Annual CPS population control updates introduced level shifts in labor-force estimates.
+  impact_estimate: Month-over-month discontinuities can reflect control updates rather than real labor changes.
+  severity: moderate
+  comparability: comparable_with_adjustments
+  source_url: https://www.bls.gov/cps/documentation.htm
+  impact_direction: unknown
+  impact_magnitude: Small annual control-induced level shifts
+
+- benchmark_case_id: PH3-003
+  dataset_code: CPS
+  indicator_code: UNEMPLOYMENT_RATE
+  change_type: classification_change
+  effective_date: "2020-04-01"
+  description: COVID response conditions increased the probability of temporary-absence misclassification in CPS labor status.
+  impact_estimate: Official unemployment in spring 2020 understated labor distress relative to adjusted coding.
+  severity: major
+  comparability: comparable_with_adjustments
+  source_url: https://www.bls.gov/cps/employment-situation-covid19-faq-april-2020.pdf
+  impact_direction: decrease
+  impact_magnitude: About 1 percentage point undercount in April 2020
+
+- benchmark_case_id: PH3-004
+  dataset_code: CPS
+  indicator_code: UNEMPLOYMENT_RATE
+  change_type: weighting_update
+  effective_date: "2021-01-01"
+  description: Updated population controls after the 2020 Census introduced standard January CPS level shifts.
+  impact_estimate: Year-to-year comparisons spanning January 2021 require control-adjusted interpretation.
+  severity: minor
+  comparability: comparable_with_adjustments
+  source_url: https://www.bls.gov/cps/documentation.htm
+  impact_direction: unknown
+  impact_magnitude: Routine annual control revision
+
+- benchmark_case_id: PH3-005
+  dataset_code: CPS
+  indicator_code: UNEMPLOYMENT_RATE
+  change_type: collection_mode
+  effective_date: "2020-03-01"
+  description: Pandemic field constraints altered interview operations and nonresponse composition in CPS collection.
+  impact_estimate: Potentially elevated nonresponse-related volatility in labor indicators during early pandemic months.
+  severity: moderate
+  comparability: uncertain
+  source_url: https://www.bls.gov/cps/documentation.htm
+  impact_direction: unknown
+  impact_magnitude: Higher short-term variance
+
+- benchmark_case_id: PH3-006
+  dataset_code: CPS
+  indicator_code: UNEMPLOYMENT_RATE
+  change_type: definition_change
+  effective_date: "2010-01-01"
+  description: Expanded labor-force guidance around temporary layoffs and attachment categories affected interpretation of headline unemployment.
+  impact_estimate: Some labor slack moved across adjacent status categories without equivalent real-economy shifts.
+  severity: minor
+  comparability: comparable_with_adjustments
+  source_url: https://www.bls.gov/cps/documentation.htm
+  impact_direction: unknown
+  impact_magnitude: Category-shift sensitivity
+
+- benchmark_case_id: PH3-007
+  dataset_code: ACS
+  indicator_code: MEDIAN_HH_INCOME
+  change_type: collection_mode
+  effective_date: "2020-03-01"
+  description: ACS suspended in-person interviewing during COVID and shifted to mail/internet-only operations.
+  impact_estimate: Response composition shift raised risk of upward bias in median household income estimates.
+  severity: major
+  comparability: not_comparable
+  source_url: https://www.census.gov/programs-surveys/acs/technical-documentation/user-notes/2020.html
+  impact_direction: increase
+  impact_magnitude: Pandemic nonresponse bias risk
+
+- benchmark_case_id: PH3-008
+  dataset_code: ACS
+  indicator_code: MEDIAN_HH_INCOME
+  change_type: weighting_update
+  effective_date: "2021-01-01"
+  description: ACS weighting and imputation adjustments were revised after abnormal 2020 response patterns.
+  impact_estimate: 2020-2021 comparisons require caution because weighting corrections can alter level estimates.
+  severity: moderate
+  comparability: comparable_with_adjustments
+  source_url: https://www.census.gov/programs-surveys/acs/technical-documentation/user-notes.html
+  impact_direction: unknown
+  impact_magnitude: Model-based reweighting changes
+
+- benchmark_case_id: PH3-009
+  dataset_code: ACS
+  indicator_code: MEDIAN_HH_INCOME
+  change_type: imputation_method
+  effective_date: "2020-01-01"
+  description: Higher item nonresponse increased reliance on allocation/imputation for key income variables.
+  impact_estimate: Imputation dependence may dampen or distort true distributional changes.
+  severity: moderate
+  comparability: uncertain
+  source_url: https://www.census.gov/programs-surveys/acs/technical-documentation/user-notes/2020.html
+  impact_direction: unknown
+  impact_magnitude: Higher imputation share
+
+- benchmark_case_id: PH3-010
+  dataset_code: ACS
+  indicator_code: MEDIAN_HH_INCOME
+  change_type: sample_redesign
+  effective_date: "2019-01-01"
+  description: Operational sample balancing updates changed response follow-up emphasis before the pandemic period.
+  impact_estimate: Small composition shifts can influence subgroup and income trend estimates.
+  severity: minor
+  comparability: comparable_with_adjustments
+  source_url: https://www.census.gov/programs-surveys/acs/technical-documentation/user-notes.html
+  impact_direction: unknown
+  impact_magnitude: Low but non-zero composition shift
+
+- benchmark_case_id: PH3-011
+  dataset_code: ACS
+  indicator_code: MEDIAN_HH_INCOME
+  change_type: collection_mode
+  effective_date: "2021-01-01"
+  description: Post-2020 ACS collection recovery changed response-rate regimes relative to pandemic trough conditions.
+  impact_estimate: Observed rebound partly reflects collection normalization rather than only income growth.
+  severity: moderate
+  comparability: comparable_with_adjustments
+  source_url: https://www.census.gov/programs-surveys/acs/technical-documentation/user-notes.html
+  impact_direction: increase
+  impact_magnitude: Recovery-period comparability caveat
+
+- benchmark_case_id: PH3-012
+  dataset_code: NHIS
+  indicator_code: ECIGARETTE_ADULT
+  change_type: questionnaire_redesign
+  effective_date: "2019-01-01"
+  description: NHIS questionnaire architecture changed substantially in 2019, affecting several health trend series.
+  impact_estimate: Direct pre/post trend comparisons require redesign-aware adjustments.
+  severity: major
+  comparability: not_comparable
+  source_url: https://www.cdc.gov/nchs/nhis/2019_quest_redesign.htm
+  impact_direction: unknown
+  impact_magnitude: Potential 0.5-1.0pp effect in e-cigarette prevalence
+
+- benchmark_case_id: PH3-013
+  dataset_code: NHIS
+  indicator_code: AFFORD_MEDICAL
+  change_type: questionnaire_redesign
+  effective_date: "2019-01-01"
+  description: Health care access and affordability items were restructured in NHIS 2019 redesign.
+  impact_estimate: Question wording and skip logic changes altered response distributions.
+  severity: major
+  comparability: not_comparable
+  source_url: https://www.cdc.gov/nchs/nhis/2019_quest_redesign.htm
+  impact_direction: unknown
+  impact_magnitude: Break in continuity
+
+- benchmark_case_id: PH3-014
+  dataset_code: NHIS
+  indicator_code: ECIGARETTE_ADULT
+  change_type: collection_mode
+  effective_date: "2020-03-01"
+  description: COVID-era NHIS operational changes modified interview conditions and response patterns.
+  impact_estimate: Pandemic mode shifts may confound short-run prevalence changes.
+  severity: moderate
+  comparability: uncertain
+  source_url: https://www.cdc.gov/nchs/nhis/2019_quest_redesign.htm
+  impact_direction: unknown
+  impact_magnitude: Short-run volatility increase
+
+- benchmark_case_id: PH3-015
+  dataset_code: NHIS
+  indicator_code: AFFORD_MEDICAL
+  change_type: sample_redesign
+  effective_date: "2019-01-01"
+  description: Sample-adult redesign altered domain estimates for insurance and cost barriers.
+  impact_estimate: Cross-year levels should be interpreted with redesign notes.
+  severity: moderate
+  comparability: comparable_with_adjustments
+  source_url: https://www.cdc.gov/nchs/nhis/2019_quest_redesign.htm
+  impact_direction: unknown
+  impact_magnitude: Domain-level level shift
+
+- benchmark_case_id: PH3-016
+  dataset_code: EU-LFS
+  indicator_code: EU_UNEMPLOYMENT
+  change_type: definition_change
+  effective_date: "2021-01-01"
+  description: EU-LFS implemented updated ICLS labor-force definitions from 2021 onward.
+  impact_estimate: Headline unemployment rate moved lower due to definition and reference changes.
+  severity: major
+  comparability: not_comparable
+  source_url: https://ec.europa.eu/eurostat/web/lfs/methodology
+  impact_direction: decrease
+  impact_magnitude: Around 0.3-0.4pp lower unemployment rate
+
+- benchmark_case_id: PH3-017
+  dataset_code: EU-LFS
+  indicator_code: EU_UNEMPLOYMENT
+  change_type: collection_mode
+  effective_date: "2020-03-01"
+  description: Pandemic disruptions shifted labor-force interview modes across member states.
+  impact_estimate: Cross-country measurement comparability weakened during pandemic collection disruptions.
+  severity: moderate
+  comparability: uncertain
+  source_url: https://ec.europa.eu/eurostat/web/lfs/methodology
+  impact_direction: unknown
+  impact_magnitude: Country-specific mode effects
+
+- benchmark_case_id: PH3-018
+  dataset_code: EU-LFS
+  indicator_code: EU_UNEMPLOYMENT
+  change_type: classification_change
+  effective_date: "2021-01-01"
+  description: Temporary layoff and job-search treatment updates changed category mapping in LFS outputs.
+  impact_estimate: Part of post-2021 trend movement reflects recoding rather than labor-demand shocks.
+  severity: moderate
+  comparability: comparable_with_adjustments
+  source_url: https://ec.europa.eu/eurostat/statistics-explained/index.php?title=EU_Labour_Force_Survey_-_new_methodology_from_2021_onwards
+  impact_direction: decrease
+  impact_magnitude: Reclassification contribution to level change
+
+- benchmark_case_id: PH3-019
+  dataset_code: EU-LFS
+  indicator_code: EU_UNEMPLOYMENT
+  change_type: weighting_update
+  effective_date: "2022-01-01"
+  description: Post-method-change calibration updates were applied to improve harmonized labor estimates.
+  impact_estimate: Calibration revisions can generate minor annual discontinuities.
+  severity: minor
+  comparability: comparable_with_adjustments
+  source_url: https://ec.europa.eu/eurostat/web/lfs/methodology
+  impact_direction: unknown
+  impact_magnitude: Minor annual level shifts
+
+- benchmark_case_id: PH3-020
+  dataset_code: CPI
+  indicator_code: CPI_ALL
+  change_type: collection_mode
+  effective_date: "2020-03-01"
+  description: COVID restrictions reduced in-person price collection and forced broader imputation in CPI.
+  impact_estimate: Category-level inflation rates became more model-dependent during shutdown periods.
+  severity: major
+  comparability: not_comparable
+  source_url: https://www.bls.gov/cpi/covid-19-impact.htm
+  impact_direction: unknown
+  impact_magnitude: Large temporary imputation share
+
+- benchmark_case_id: PH3-021
+  dataset_code: CPI
+  indicator_code: CPI_ALL
+  change_type: weighting_update
+  effective_date: "2023-01-01"
+  description: BLS moved to annual CPI weights from two-year weight updates.
+  impact_estimate: Short-term inflation comparisons around annual reweighting points need caution.
+  severity: moderate
+  comparability: comparable_with_adjustments
+  source_url: https://www.bls.gov/cpi/notices/2022/methodology-changes.htm
+  impact_direction: unknown
+  impact_magnitude: Composition-driven annual shift
+
+- benchmark_case_id: PH3-022
+  dataset_code: CPI
+  indicator_code: CPI_ALL
+  change_type: imputation_method
+  effective_date: "2020-04-01"
+  description: Expanded carry-forward and class-mean imputation for missing CPI observations during closures.
+  impact_estimate: Methodological smoothing may understate true short-run volatility.
+  severity: moderate
+  comparability: uncertain
+  source_url: https://www.bls.gov/cpi/covid-19-impact.htm
+  impact_direction: decrease
+  impact_magnitude: Potential volatility dampening
+
+- benchmark_case_id: PH3-023
+  dataset_code: HICP
+  indicator_code: HICP_ALL
+  change_type: imputation_method
+  effective_date: "2020-03-01"
+  description: Eurostat pandemic guidance expanded imputation usage where prices were temporarily unavailable.
+  impact_estimate: Cross-country category comparability weakened due to differing imputation paths.
+  severity: moderate
+  comparability: uncertain
+  source_url: https://ec.europa.eu/eurostat/documents/10186/10693286/Guidance-on-the-compilation-of-HICP.pdf
+  impact_direction: unknown
+  impact_magnitude: Heterogeneous imputation effects
+
+- benchmark_case_id: PH3-024
+  dataset_code: HICP
+  indicator_code: HICP_ALL
+  change_type: weighting_update
+  effective_date: "2021-01-01"
+  description: Consumption basket weights were unusually reallocated after pandemic demand shocks.
+  impact_estimate: Measured inflation partly reflects abrupt basket updates rather than pure price shifts.
+  severity: moderate
+  comparability: comparable_with_adjustments
+  source_url: https://ec.europa.eu/eurostat/web/hicp/methodology
+  impact_direction: unknown
+  impact_magnitude: Noticeable basket reweighting impact
+
+- benchmark_case_id: PH3-025
+  dataset_code: HICP
+  indicator_code: HICP_ALL
+  change_type: collection_mode
+  effective_date: "2020-03-01"
+  description: HICP collection mode changed under lockdown with temporary outlet closures and substitution effects.
+  impact_estimate: Country-level series continuity degraded in constrained collection windows.
+  severity: moderate
+  comparability: uncertain
+  source_url: https://ec.europa.eu/eurostat/web/hicp/methodology
+  impact_direction: unknown
+  impact_magnitude: Country-specific measurement artifacts
+
+- benchmark_case_id: PH3-026
+  dataset_code: EU-MORTALITY
+  indicator_code: EXCESS_MORTALITY
+  change_type: other
+  effective_date: "2020-01-01"
+  description: Delayed death registration and revision cycles changed early-release excess mortality levels.
+  impact_estimate: Initial excess mortality values were revised as late reports arrived.
+  severity: moderate
+  comparability: uncertain
+  source_url: https://ec.europa.eu/eurostat/cache/metadata/EN/demomwk_esms.htm
+  impact_direction: increase
+  impact_magnitude: Upward revisions in some waves
+
+- benchmark_case_id: PH3-027
+  dataset_code: EU-MORTALITY
+  indicator_code: EXCESS_MORTALITY
+  change_type: definition_change
+  effective_date: "2021-01-01"
+  description: Baseline-window and reference-population adjustments changed interpretation of excess mortality percentages.
+  impact_estimate: Cross-period excess mortality comparisons can be sensitive to baseline recalibration.
+  severity: minor
+  comparability: comparable_with_adjustments
+  source_url: https://ec.europa.eu/eurostat/statistics-explained/index.php?title=Excess_mortality_-_statistics
+  impact_direction: unknown
+  impact_magnitude: Baseline-sensitive percentage changes
+
+- benchmark_case_id: PH3-028
+  dataset_code: ESA2010
+  indicator_code: GDP_LEVEL
+  change_type: classification_change
+  effective_date: "2014-09-01"
+  description: ESA 2010 introduced major national-accounts reclassification including R&D capitalization.
+  impact_estimate: GDP levels increased structurally due to accounting treatment updates.
+  severity: major
+  comparability: not_comparable
+  source_url: https://ec.europa.eu/eurostat/web/esa-2010
+  impact_direction: increase
+  impact_magnitude: 2-4% GDP level shift in many countries
+
+- benchmark_case_id: PH3-029
+  dataset_code: ESA2010
+  indicator_code: GDP_LEVEL
+  change_type: definition_change
+  effective_date: "2019-01-01"
+  description: Supplemental benchmark revisions and balancing updates in national accounts altered GDP level comparability.
+  impact_estimate: Some period-to-period GDP differences reflect accounting refinements.
+  severity: moderate
+  comparability: comparable_with_adjustments
+  source_url: https://ec.europa.eu/eurostat/web/esa-2010
+  impact_direction: unknown
+  impact_magnitude: Benchmark revision level effects
+
+- benchmark_case_id: PH3-030
+  dataset_code: EU-SILC
+  indicator_code: AROP_RATE
+  change_type: sample_redesign
+  effective_date: "2016-01-01"
+  description: Ireland EU-SILC adopted administrative income data and introduced an explicit series break.
+  impact_estimate: Part of at-risk-of-poverty movement is methodological rather than socioeconomic.
+  severity: major
+  comparability: not_comparable
+  source_url: https://www.cso.ie/en/releasesandpublications/er/silc/surveyonincomeandlivingconditionssilc2016/
+  impact_direction: decrease
+  impact_magnitude: Documented break in national series
+
+- benchmark_case_id: PH3-031
+  dataset_code: EU-SILC
+  indicator_code: AROP_RATE
+  change_type: collection_mode
+  effective_date: "2020-03-01"
+  description: Pandemic effects disrupted interview operations and response quality in EU-SILC panels.
+  impact_estimate: Cross-year poverty comparisons around 2020-2021 carry nonresponse comparability risk.
+  severity: moderate
+  comparability: uncertain
+  source_url: https://ec.europa.eu/eurostat/web/income-and-living-conditions/methodology
+  impact_direction: unknown
+  impact_magnitude: Panel attrition and response bias risk
+
+- benchmark_case_id: PH3-032
+  dataset_code: EU-SILC
+  indicator_code: AROP_RATE
+  change_type: weighting_update
+  effective_date: "2021-01-01"
+  description: Post-pandemic calibration adjustments altered SILC weighting structures in several member states.
+  impact_estimate: Reweighting may shift reported poverty rates without equivalent welfare changes.
+  severity: moderate
+  comparability: comparable_with_adjustments
+  source_url: https://ec.europa.eu/eurostat/web/income-and-living-conditions/methodology
+  impact_direction: unknown
+  impact_magnitude: Calibration-driven level adjustment
+
+- benchmark_case_id: PH3-033
+  dataset_code: EU-SILC
+  indicator_code: AROP_RATE
+  change_type: definition_change
+  effective_date: "2022-01-01"
+  description: Indicator framework refinements for deprivation/poverty domains affected historical comparability flags.
+  impact_estimate: Trend interpretation requires alignment on old/new indicator definitions.
+  severity: minor
+  comparability: comparable_with_adjustments
+  source_url: https://ec.europa.eu/eurostat/web/income-and-living-conditions/methodology
+  impact_direction: unknown
+  impact_magnitude: Indicator-definition sensitivity
+
+- benchmark_case_id: PH3-034
+  dataset_code: CPS
+  indicator_code: UNEMPLOYMENT_RATE
+  change_type: weighting_update
+  effective_date: "2017-01-01"
+  description: Annual CPS population control update generated routine level revisions.
+  impact_estimate: January year-over-year comparisons should account for control effects.
+  severity: minor
+  comparability: comparable_with_adjustments
+  source_url: https://www.bls.gov/cps/documentation.htm
+  impact_direction: unknown
+  impact_magnitude: Minor January discontinuity
+
+- benchmark_case_id: PH3-035
+  dataset_code: CPS
+  indicator_code: UNEMPLOYMENT_RATE
+  change_type: weighting_update
+  effective_date: "2018-01-01"
+  description: Annual CPS controls updated labor-force benchmark levels.
+  impact_estimate: Month-to-month continuity around January includes benchmark revision effects.
+  severity: minor
+  comparability: comparable_with_adjustments
+  source_url: https://www.bls.gov/cps/documentation.htm
+  impact_direction: unknown
+  impact_magnitude: Minor benchmark shift
+
+- benchmark_case_id: PH3-036
+  dataset_code: CPS
+  indicator_code: UNEMPLOYMENT_RATE
+  change_type: weighting_update
+  effective_date: "2019-01-01"
+  description: CPS annual population controls revised employment/unemployment levels.
+  impact_estimate: Comparable trend analysis should reference annual control notes.
+  severity: minor
+  comparability: comparable_with_adjustments
+  source_url: https://www.bls.gov/cps/documentation.htm
+  impact_direction: unknown
+  impact_magnitude: Minor annual level shift
+
+- benchmark_case_id: PH3-037
+  dataset_code: CPI
+  indicator_code: CPI_ALL
+  change_type: weighting_update
+  effective_date: "2024-01-01"
+  description: Annual CPI weight update changed expenditure composition entering 2024.
+  impact_estimate: Inflation components can shift at reweighting boundaries independently of pure price change.
+  severity: minor
+  comparability: comparable_with_adjustments
+  source_url: https://www.bls.gov/cpi/notices/2022/methodology-changes.htm
+  impact_direction: unknown
+  impact_magnitude: Annual basket reset effect
+
+- benchmark_case_id: PH3-038
+  dataset_code: EU-LFS
+  indicator_code: EU_UNEMPLOYMENT
+  change_type: collection_mode
+  effective_date: "2022-01-01"
+  description: Post-transition operational harmonization in EU-LFS changed implementation details across member states.
+  impact_estimate: Some cross-country differences reflect implementation timing rather than labor fundamentals.
+  severity: minor
+  comparability: comparable_with_adjustments
+  source_url: https://ec.europa.eu/eurostat/web/lfs/methodology
+  impact_direction: unknown
+  impact_magnitude: Harmonization lag effects
+
+- benchmark_case_id: PH3-039
+  dataset_code: HICP
+  indicator_code: HICP_ALL
+  change_type: weighting_update
+  effective_date: "2022-01-01"
+  description: HICP weights were revised with pandemic-era consumption rebalancing still influencing category shares.
+  impact_estimate: Post-pandemic inflation comparisons remain sensitive to basket normalization speed.
+  severity: minor
+  comparability: comparable_with_adjustments
+  source_url: https://ec.europa.eu/eurostat/web/hicp/methodology
+  impact_direction: unknown
+  impact_magnitude: Category-share normalization
+
+- benchmark_case_id: PH3-040
+  dataset_code: EU-MORTALITY
+  indicator_code: EXCESS_MORTALITY
+  change_type: other
+  effective_date: "2022-01-01"
+  description: Ongoing backfill and release cadence adjustments affected the timing profile of excess mortality indicators.
+  impact_estimate: Short-horizon trend turns can be revised as delayed registrations are incorporated.
+  severity: minor
+  comparability: uncertain
+  source_url: https://ec.europa.eu/eurostat/cache/metadata/EN/demomwk_esms.htm
+  impact_direction: unknown
+  impact_magnitude: Publication-lag revision risk

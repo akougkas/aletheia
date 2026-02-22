@@ -1,0 +1,53 @@
+- code: NHIS
+  name: National Health Interview Survey
+  agency_code: CDC
+  description: Annual survey of civilian noninstitutionalized population on health topics
+  frequency: annual
+
+- code: CPS
+  name: Current Population Survey
+  agency_code: BLS
+  description: Monthly survey of households on labor force characteristics
+  frequency: monthly
+
+- code: ACS
+  name: American Community Survey
+  agency_code: CENSUS
+  description: Annual survey of demographic, social, economic, and housing characteristics
+  frequency: annual
+
+- code: CPI
+  name: Consumer Price Index
+  agency_code: BLS
+  description: Measures average change in prices paid by urban consumers
+  frequency: monthly
+
+- code: EU-LFS
+  name: EU Labour Force Survey
+  agency_code: EUROSTAT
+  description: Quarterly survey on labor participation across EU member states
+  frequency: quarterly
+
+- code: HICP
+  name: Harmonised Index of Consumer Prices
+  agency_code: EUROSTAT
+  description: Comparable measure of consumer price inflation in the EU
+  frequency: monthly
+
+- code: EU-MORTALITY
+  name: Eurostat Weekly Mortality Statistics
+  agency_code: EUROSTAT
+  description: Weekly excess mortality and delayed registration monitoring for EU countries
+  frequency: weekly
+
+- code: ESA2010
+  name: European System of Accounts 2010
+  agency_code: EUROSTAT
+  description: Macroeconomic accounting framework for EU national accounts
+  frequency: annual
+
+- code: EU-SILC
+  name: EU Statistics on Income and Living Conditions
+  agency_code: EUROSTAT
+  description: Reference source for comparative statistics on income distribution and social exclusion
+  frequency: annual

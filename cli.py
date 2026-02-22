@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 
 from aletheia.agents.orchestrator import OrchestratorAgent
-from aletheia.db import get_db_url, test_connection
+from aletheia.db import get_db_url, test_connection, close_db
 from aletheia.retrieval_store import RetrievalStore
 from aletheia.runtime_profiles import (
     PROFILE_CHOICES,
@@ -1080,8 +1080,7 @@ async def show_db_doctor(
 
         status_lines = [
             ui.status_dot(True, "Connection", result.get("db_url_redacted", "")),
-            ui.status_dot(bool(result.get("pgvector_enabled")), "Vector search extension"),
-            ui.status_dot(bool(result.get("pgai_installed")), "AI extension"),
+            ui.status_dot(True, "Backend", result.get("backend", "surrealdb")),
             ui.status_dot(bool(semantic), "Knowledge search ready"),
         ]
 
@@ -1136,6 +1135,7 @@ async def show_onboarding(
     db_ok = bool(db_result.get("ok"))
     chat_ok = bool(llm_result.get("chat_ok"))
     embed_ok = bool(llm_result.get("embeddings_ok"))
+    counts = db_result.get("counts") if isinstance(db_result.get("counts"), dict) else {}
     semantic_ok = bool(db_result.get("semantic_search_ready")) if db_ok else False
     chat_diag = llm_result.get("chat") if isinstance(llm_result.get("chat"), dict) else {}
     embed_diag = (
@@ -1222,7 +1222,7 @@ async def show_onboarding(
     else:
         next_steps = []
         if not db_ok:
-            next_steps.append("Start the database: docker compose up -d")
+            next_steps.append("Start the database: docker compose up -d surrealdb")
             next_steps.append("Then re-run: uv run aletheia onboarding")
         if not chat_ok:
             next_steps.append("Start your AI model server (LM Studio or Ollama)")
@@ -1358,11 +1358,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Skip expanded Phase 3 methodology-break seed rows.",
     )
 
-    sub.add_parser(
+    ingest_parser = sub.add_parser(
         "ingest",
-        help="Ingest external documents into the knowledge base (Phase 6).",
+        help="Ingest external documents into the knowledge base.",
         parents=[runtime_parent],
     )
+    ingest_parser.add_argument(
+        "--materialize",
+        action="store_true",
+        help="Run vectorizer materialization after ingest writes.",
+    )
+    ingest_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview without DB writes.",
+    )
+    ingest_sub = ingest_parser.add_subparsers(dest="ingest_action")
+    ingest_url = ingest_sub.add_parser("url", help="Ingest a single URL (HTML or PDF).")
+    ingest_url.add_argument("target", help="URL to fetch and ingest.")
+    ingest_dir = ingest_sub.add_parser("dir", help="Ingest all files from a local directory.")
+    ingest_dir.add_argument("path", help="Directory path to scan.")
+    ingest_sub.add_parser("marina", help="Parse MARINA.md knowledge lists and index summaries.")
 
     # Model management
     models_parser = sub.add_parser(
@@ -1382,6 +1398,46 @@ def _build_parser() -> argparse.ArgumentParser:
     models_load.add_argument("model_name", help="Model name to load.")
     models_unload = models_sub.add_parser("unload", help="Unload a model from memory.")
     models_unload.add_argument("model_name", help="Model name to unload.")
+
+    # Batch evaluation
+    batch_parser = sub.add_parser(
+        "batch",
+        help="Run batch evaluation on multiple claims.",
+        parents=[runtime_parent],
+    )
+    batch_parser.add_argument(
+        "claims_file",
+        nargs="?",
+        help="CSV or text file with one claim per line.",
+    )
+    batch_parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Run all 40 PHASE3_BREAKS seed cases.",
+    )
+    batch_parser.add_argument(
+        "--output",
+        default=None,
+        help="Path to write JSON results (default: stdout).",
+    )
+
+    # Graph queries
+    graph_parser = sub.add_parser(
+        "graph",
+        help="Query the knowledge graph.",
+        parents=[runtime_parent],
+    )
+    graph_sub = graph_parser.add_subparsers(dest="graph_action")
+    graph_prov = graph_sub.add_parser(
+        "provenance",
+        help="Show full evidence chain for a session.",
+    )
+    graph_prov.add_argument("session_id", help="Session record ID (e.g. session:abc123).")
+    graph_impacts = graph_sub.add_parser(
+        "impacts",
+        help="Show indicators affected by a methodology change.",
+    )
+    graph_impacts.add_argument("change_id", help="Change record ID (e.g. methodology_change:ph3_001).")
 
     # Endpoint management
     endpoints_parser = sub.add_parser(
@@ -1410,6 +1466,8 @@ def _normalize_argv(argv: list[str]) -> list[str]:
         "onboarding",
         "seed",
         "ingest",
+        "batch",
+        "graph",
         "models",
         "endpoints",
         "-h",
@@ -1683,6 +1741,218 @@ def _find_provider_for_action(endpoints: dict, action: str):
     return None
 
 
+def _run_ingest(ui: TerminalUI, args: argparse.Namespace) -> int:
+    """Dispatch ingest subcommands to aletheia.ingest functions."""
+    from pathlib import Path
+
+    from aletheia.ingest import (
+        ingest_local_directory,
+        ingest_marina_corpus,
+        ingest_single_url,
+    )
+
+    action = getattr(args, "ingest_action", None)
+    dry_run = getattr(args, "dry_run", False)
+    materialize = getattr(args, "materialize", False)
+
+    if action is None:
+        ui.error("Missing ingest action. Use: aletheia ingest {url,dir,marina}")
+        return 2
+
+    if action == "url":
+        target = args.target
+        label = f"URL: {target}"
+        if dry_run:
+            label += " (dry run)"
+        ui.info(f"Ingesting {label}...")
+        stats = asyncio.run(ingest_single_url(target, dry_run=dry_run))
+        if stats.get("error"):
+            ui.error(f"Fetch failed: {stats['error']}")
+            return 2
+        if dry_run:
+            ui.success(
+                f"Dry run: {stats['text_length']} chars, "
+                f"would produce {stats['chunks_expected']} chunks"
+            )
+        else:
+            ui.success(
+                f"Done: {stats['chunks_written']} chunks from "
+                f"{stats['documents_written']} document"
+            )
+
+    elif action == "dir":
+        dir_path = Path(args.path)
+        if not dir_path.is_dir():
+            ui.error(f"Not a directory: {dir_path}")
+            return 2
+        label = f"directory: {dir_path}"
+        if dry_run:
+            label += " (dry run)"
+        ui.info(f"Ingesting {label}...")
+        stats = asyncio.run(ingest_local_directory(dir_path, dry_run=dry_run))
+        if dry_run:
+            ui.success(f"Dry run: found {stats['files_seen']} supported files")
+        else:
+            if stats.get("errors"):
+                ui.warning(f"{stats['errors']} file(s) had extraction errors.")
+            ui.success(
+                f"Done: {stats['files_ingested']}/{stats['files_seen']} files, "
+                f"{stats['chunks_written']} chunks"
+            )
+
+    elif action == "marina":
+        marina_path = Path(".humans-collaborate/MARINA.md")
+        if not marina_path.exists():
+            marina_path = Path("MARINA.md")
+        if not marina_path.exists():
+            ui.error("MARINA.md not found in project root or .humans-collaborate/.")
+            return 2
+        label = f"MARINA corpus: {marina_path}"
+        if dry_run:
+            label += " (dry run)"
+        ui.info(f"Ingesting {label}...")
+        stats = asyncio.run(ingest_marina_corpus(marina_path, dry_run=dry_run))
+        if dry_run:
+            ui.success(f"Dry run: {stats['documents_seen']} documents would be ingested")
+        else:
+            ui.success(
+                f"Done: {stats['documents_written']}/{stats['documents_seen']} documents, "
+                f"{stats['chunks_written']} chunks"
+            )
+
+    else:
+        ui.error(f"Unknown ingest action: {action}")
+        return 2
+
+    if materialize and not dry_run:
+        ui.info("Running embedding materialization...")
+        from aletheia.vectorizer import materialize_embeddings
+
+        mat_stats = asyncio.run(materialize_embeddings())
+        ui.success(f"Materialization complete: {mat_stats}")
+
+    return 0
+
+
+def _run_batch(ui: TerminalUI, args: argparse.Namespace) -> int:
+    """Dispatch batch evaluation subcommand."""
+    from aletheia.data_loader import load_methodology_breaks
+
+    benchmark = getattr(args, "benchmark", False)
+    claims_file = getattr(args, "claims_file", None)
+    output_path = getattr(args, "output", None)
+
+    if not benchmark and not claims_file:
+        ui.error("Provide a claims file or use --benchmark.")
+        return 2
+
+    claims: list[str] = []
+    if benchmark:
+        breaks = load_methodology_breaks()
+        claims = [b["description"] for b in breaks]
+        ui.info(f"Running benchmark: {len(claims)} methodology-break claims")
+    else:
+        from pathlib import Path
+
+        path = Path(claims_file)
+        if not path.exists():
+            ui.error(f"File not found: {claims_file}")
+            return 2
+        claims = [line.strip() for line in path.read_text().splitlines() if line.strip()]
+        ui.info(f"Running batch: {len(claims)} claims from {claims_file}")
+
+    orchestrator = OrchestratorAgent()
+    results: list[dict[str, Any]] = []
+
+    async def _run():
+        try:
+            for i, claim in enumerate(claims, 1):
+                ui.info(f"[{i}/{len(claims)}] {claim[:80]}...")
+                try:
+                    verdict = await orchestrator.process_claim(claim)
+                    results.append({
+                        "claim": claim,
+                        "status": verdict.status.value,
+                        "confidence": verdict.confidence,
+                        "severity": verdict.severity.value,
+                        "comparability": verdict.comparability.value,
+                        "summary": verdict.summary,
+                        "breaks_found": len(verdict.breaks_found),
+                    })
+                except Exception as exc:
+                    results.append({"claim": claim, "error": str(exc)})
+        finally:
+            await orchestrator.close()
+
+    asyncio.run(_run())
+
+    output_json = json.dumps(results, indent=2)
+    if output_path:
+        from pathlib import Path as P
+
+        P(output_path).write_text(output_json)
+        ui.success(f"Results written to {output_path}")
+    else:
+        print(output_json)
+
+    passed = sum(1 for r in results if "error" not in r)
+    ui.success(f"Batch complete: {passed}/{len(results)} succeeded")
+    return 0
+
+
+def _run_graph(ui: TerminalUI, args: argparse.Namespace) -> int:
+    """Dispatch graph query subcommand."""
+    action = getattr(args, "graph_action", None)
+    if not action:
+        ui.error("Missing graph action. Use: aletheia graph {provenance,impacts}")
+        return 2
+
+    from aletheia.db import get_connection
+
+    if action == "provenance":
+        session_id = args.session_id
+
+        async def _prov():
+            async with get_connection() as db:
+                result = await db.query(
+                    """
+                    SELECT *,
+                        ->uses_evidence->evidence_doc.* AS evidence,
+                        ->produces->verdict.* AS verdicts
+                    FROM $session
+                    """,
+                    {"session": session_id},
+                )
+                return result
+
+        result = asyncio.run(_prov())
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+
+    if action == "impacts":
+        change_id = args.change_id
+
+        async def _impacts():
+            async with get_connection() as db:
+                result = await db.query(
+                    """
+                    SELECT *,
+                        ->affects->indicator.* AS affected_indicators,
+                        ->belongs_to->dataset.* AS datasets
+                    FROM $change
+                    """,
+                    {"change": change_id},
+                )
+                return result
+
+        result = asyncio.run(_impacts())
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+
+    ui.error(f"Unknown graph action: {action}")
+    return 2
+
+
 def main() -> int:
     parser = _build_parser()
     argv = _normalize_argv(sys.argv[1:])
@@ -1730,10 +2000,12 @@ def main() -> int:
 
         ui.info("Seeding database with benchmark cases and methodology breaks...")
         try:
-            result = bootstrap_db(
-                include_seed=True,
-                include_validate=not getattr(args, "no_validate", False),
-                include_phase3_breaks=not getattr(args, "no_phase3_breaks", False),
+            result = asyncio.run(
+                bootstrap_db(
+                    include_seed=True,
+                    include_validate=not getattr(args, "no_validate", False),
+                    include_phase3_breaks=not getattr(args, "no_phase3_breaks", False),
+                )
             )
             ui.success(f"Seed complete: {result['actions']} (db: {result['db_url_redacted']})")
             return 0
@@ -1741,8 +2013,11 @@ def main() -> int:
             ui.error(f"Seed failed: {exc}")
             return 2
     if command == "ingest":
-        ui.info("Not yet implemented. Coming in Phase 6.")
-        return 0
+        return _run_ingest(ui, args)
+    if command == "batch":
+        return _run_batch(ui, args)
+    if command == "graph":
+        return _run_graph(ui, args)
     if command == "models":
         return asyncio.run(show_models(ui, getattr(args, "models_action", None), args))
     if command == "endpoints":

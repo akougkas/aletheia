@@ -774,7 +774,7 @@ class EvidencePipeline:
                 "fallback_source_id": plan.fallback_source_id,
             },
         )
-        run_id: int | None = None
+        run_id: str | None = None
         if self.retrieval_store:
             run_id = await self.retrieval_store.begin_run(claim, plan)
 
