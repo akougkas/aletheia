@@ -42,7 +42,7 @@ async def test_onboarding_reports_chat_ok_embeddings_unsupported(monkeypatch, ca
     rendered = capsys.readouterr().out
 
     assert exit_code == 2
-    assert "Chat is reachable but embeddings are unsupported" in rendered
+    assert "doesn't support embeddings" in rendered or "unsupported" in rendered.lower()
 
 
 def test_profile_context_renders_sources(capsys):
@@ -61,5 +61,5 @@ def test_profile_context_renders_sources(capsys):
     )
     cli._render_profile_context(ui, resolved)
     rendered = capsys.readouterr().out
-    assert "Runtime Profile" in rendered
+    assert "Configuration" in rendered
     assert "zbook-single" in rendered

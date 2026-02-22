@@ -9,13 +9,20 @@ from typing import Any
 
 try:
     from rich import box
-    from rich.console import Console
+    from rich.columns import Columns
+    from rich.console import Console, Group
     from rich.panel import Panel
+    from rich.status import Status
     from rich.table import Table
+    from rich.text import Text
 except Exception:  # noqa: BLE001
+    Columns = None
     Console = None
+    Group = None
     Panel = None
+    Status = None
     Table = None
+    Text = None
     box = None
 
 
@@ -151,3 +158,197 @@ class TerminalUI:
         if self._enabled:
             return "[green]OK[/green]" if ok else "[red]MISSING[/red]"
         return "OK" if ok else "MISSING"
+
+    def panel(self, body: str, *, title: str = "", border: str = "cyan", dim: bool = False) -> None:
+        """Render content inside a titled panel."""
+        if self._enabled and self.console and Panel:
+            style = "dim" if dim else border
+            self.console.print(
+                Panel(body, title=f"[bold]{title}[/bold]" if title else None,
+                      border_style=style, padding=(1, 2)),
+            )
+            return
+        if title:
+            print(f"\n--- {title} ---")
+        print(body)
+        if title:
+            print("---")
+
+    def hint(self, message: str) -> None:
+        """Render a dim guidance line."""
+        if self._enabled and self.console:
+            self.console.print(f"  [dim italic]{message}[/dim italic]")
+            return
+        print(f"  {message}")
+
+    def status_dot(self, ok: bool, label: str, detail: str = "") -> str:
+        """Return a styled status indicator line: ● Ready / ○ Not Ready."""
+        if self._enabled:
+            dot = "[green]●[/green]" if ok else "[red]○[/red]"
+            state = "[green]Ready[/green]" if ok else "[red]Not ready[/red]"
+            line = f"{dot} {label}  {state}"
+            if detail:
+                line += f"  [dim]{detail}[/dim]"
+            return line
+        dot = "●" if ok else "○"
+        state = "Ready" if ok else "Not ready"
+        line = f"{dot} {label}  {state}"
+        if detail:
+            line += f"  {detail}"
+        return line
+
+    @staticmethod
+    def confidence_bar(value: float, *, width: int = 20) -> str:
+        """Return a visual bar: ████████░░░░ 85%."""
+        filled = int(value * width)
+        empty = width - filled
+        pct = f"{value:.0%}"
+        bar = "█" * filled + "░" * empty
+        if value >= 0.8:
+            return f"[green]{bar}[/green] {pct}"
+        if value >= 0.6:
+            return f"[yellow]{bar}[/yellow] {pct}"
+        return f"[red]{bar}[/red] {pct}"
+
+    @staticmethod
+    def confidence_bar_plain(value: float, *, width: int = 20) -> str:
+        """Plain-text confidence bar."""
+        filled = int(value * width)
+        empty = width - filled
+        return f"{'█' * filled}{'░' * empty} {value:.0%}"
+
+    @staticmethod
+    def decomposition_bar(method_share: float, *, width: int = 24) -> tuple[str, str]:
+        """Return (methodology_line, real_line) for visual decomposition.
+
+        Returns Rich-markup strings for methodology and real components.
+        """
+        real_share = 1.0 - method_share
+        m_filled = max(1, int(method_share * width))
+        r_filled = max(1, int(real_share * width))
+        m_bar = "█" * m_filled + "░" * (width - m_filled)
+        r_bar = "█" * r_filled + "░" * (width - r_filled)
+        return (
+            f"[yellow]{m_bar}[/yellow] {method_share:.0%} methodology",
+            f"[cyan]{r_bar}[/cyan] {real_share:.0%} real change",
+        )
+
+    # -- Spinner support --------------------------------------------------
+
+    def create_spinner(self) -> "PipelineSpinner":
+        """Return a spinner that updates in-place during pipeline runs."""
+        return PipelineSpinner(self)
+
+    # -- Color-coded verdict helpers --------------------------------------
+
+    @staticmethod
+    def style_status(status: str) -> str:
+        """Return Rich-markup string for a verdict status value."""
+        _map = {
+            "SUPPORTED": "[bold green]SUPPORTED[/bold green]",
+            "PARTIALLY_SUPPORTED": "[bold yellow]PARTIALLY SUPPORTED[/bold yellow]",
+            "MISLEADING": "[bold red]MISLEADING[/bold red]",
+            "INSUFFICIENT_DATA": "[dim]INSUFFICIENT DATA[/dim]",
+        }
+        return _map.get(status.upper(), status)
+
+    @staticmethod
+    def style_confidence(value: float) -> str:
+        """Return Rich-markup string for a confidence percentage."""
+        pct = f"{value:.0%}"
+        if value >= 0.8:
+            return f"[green]{pct}[/green]"
+        if value >= 0.6:
+            return f"[yellow]{pct}[/yellow]"
+        return f"[red]{pct}[/red]"
+
+    @staticmethod
+    def style_severity(severity: str) -> str:
+        """Return Rich-markup string for a severity value."""
+        _map = {
+            "MAJOR": "[bold red]MAJOR[/bold red]",
+            "MODERATE": "[yellow]MODERATE[/yellow]",
+            "MINOR": "[dim]MINOR[/dim]",
+        }
+        return _map.get(severity.upper(), severity)
+
+    @staticmethod
+    def style_comparability(comp: str) -> str:
+        """Return Rich-markup string for a comparability value."""
+        _map = {
+            "COMPARABLE": "[green]COMPARABLE[/green]",
+            "UNCERTAIN": "[yellow]UNCERTAIN[/yellow]",
+            "NOT_COMPARABLE": "[red]NOT COMPARABLE[/red]",
+        }
+        return _map.get(comp.upper(), comp)
+
+
+class PipelineSpinner:
+    """In-place spinner that tracks pipeline progress events.
+
+    When Rich is available, uses ``rich.status.Status`` for animated updates.
+    Falls back to plain ``print()`` lines otherwise.
+    """
+
+    def __init__(self, ui: TerminalUI):
+        self._ui = ui
+        self._status: Any | None = None  # rich.status.Status when active
+        self._source_results: list[str] = []
+
+    def start(self) -> None:
+        if self._ui._enabled and self._ui.console and Status:
+            self._status = self._ui.console.status(
+                "[cyan]Starting pipeline...[/cyan]",
+                spinner="dots",
+            )
+            self._status.start()
+        else:
+            print("Starting pipeline...")
+
+    def stop(self) -> None:
+        if self._status is not None:
+            self._status.stop()
+            self._status = None
+
+    def update(self, event: dict[str, Any]) -> None:
+        """Handle a progress_callback event from the orchestrator."""
+        kind = event.get("event")
+        msg = self._format_event(kind, event)
+        if not msg:
+            return
+
+        if self._status is not None:
+            # Build a multi-line status: current step + accumulated source results
+            lines = list(self._source_results)
+            lines.append(f"[cyan]{msg}[/cyan]")
+            self._status.update("\n".join(lines))
+        else:
+            print(msg)
+
+    def _format_event(self, kind: str | None, event: dict[str, Any]) -> str | None:
+        if kind == "parser_started":
+            return "Parsing claim..."
+        if kind == "parser_completed":
+            return "Claim parsed"
+        if kind == "routing_selected":
+            sources = event.get("source_ids") or []
+            return f"Running {', '.join(sources)}..."
+        if kind == "source_started":
+            return f"Running {event.get('source_id')}..."
+        if kind == "source_completed":
+            sid = event.get("source_id")
+            docs = event.get("doc_count", 0)
+            breaks = event.get("break_count", 0)
+            line = f"{sid} done ({breaks} breaks, {docs} docs)"
+            self._source_results.append(f"[dim]  {line}[/dim]")
+            return line
+        if kind == "collection_completed":
+            docs = event.get("evidence_count", 0)
+            breaks = event.get("break_count", 0)
+            conf = event.get("aggregate_confidence", 0.0)
+            return f"Evidence collected ({docs} docs, {breaks} breaks, conf={conf:.2f})"
+        if kind == "editor_started":
+            return "Synthesizing verdict..."
+        if kind == "editor_completed":
+            return "Verdict ready"
+        return None

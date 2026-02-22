@@ -89,12 +89,30 @@ def _runtime_override_args(args: argparse.Namespace) -> dict[str, str | None]:
     }
 
 
+_CAPABILITY_FRIENDLY = {
+    "runtime_profile": "Runtime Profile",
+    "local_llm": "Local AI Model",
+    "embedding_endpoint": "Embedding Model",
+    "cloud_llm_openai": "Cloud AI (OpenAI)",
+    "web_search_duckduckgo": "Web Search (DuckDuckGo)",
+    "web_search_google_cse": "Web Search (Google)",
+    "web_search_brave": "Web Search (Brave)",
+    "scholar_serpapi": "Scholar Search",
+    "semantic_vector_search": "Knowledge Search",
+    "crawl4ai_fallback": "Web Page Reader",
+    "fred_api_enhanced": "FRED Economic Data",
+    "census_api_enhanced": "US Census Data",
+}
+
+
 def _render_capabilities(ui: TerminalUI) -> None:
     rows = [
-        [name, "enabled" if enabled else "optional/off", note]
+        [_CAPABILITY_FRIENDLY.get(name, name),
+         "Active" if enabled else "Inactive",
+         note]
         for name, enabled, note in _capability_rows()
     ]
-    ui.table("Capability Matrix", ["Capability", "State", "Notes"], rows)
+    ui.table("Available Capabilities", ["Feature", "Status", "Details"], rows)
 
 
 def format_capability_matrix() -> str:
@@ -106,62 +124,229 @@ def format_capability_matrix() -> str:
     return "\n".join(lines)
 
 
-def _render_verdict(ui: TerminalUI, verdict) -> None:
-    ui.kv_table(
-        "Verdict",
-        [
-            ("status", verdict.status.value),
-            ("severity", verdict.severity.value),
-            ("comparability", verdict.comparability.value),
-            ("confidence", f"{verdict.confidence:.0%}"),
-            ("claim", verdict.claim.original_text),
-            ("summary", verdict.summary),
-        ],
+def _render_help(ui: TerminalUI) -> None:
+    """Render interactive help with grouped commands."""
+    if ui._enabled and ui.console:
+        from rich.panel import Panel as RichPanel
+
+        body = (
+            "[bold cyan]After a verdict:[/bold cyan]\n"
+            "  [bold]details[/bold]    Full breakdown — caveats, data sources, routing, AI reasoning\n"
+            "  [bold]trail[/bold]      List all documents and data used as evidence\n"
+            "  [bold]trail 3[/bold]    Inspect a specific evidence document by number\n"
+            "  [bold]trace[/bold]      See how the AI agents communicated internally\n"
+            "\n"
+            "[bold cyan]Re-analyze:[/bold cyan]\n"
+            "  [bold]!rerun[/bold]     Re-analyze the last claim (useful after config changes)\n"
+            "  [bold]!deep[/bold]      Re-analyze with deeper research (searches more sources)\n"
+            "  [bold]!deep on[/bold]   Always use deep research for future claims\n"
+            "  [bold]!deep off[/bold]  Return to normal research depth\n"
+            "\n"
+            "[bold cyan]Session:[/bold cyan]\n"
+            "  [bold]!mode[/bold]      Show current settings (deep mode, last claim)\n"
+            "  [bold]help[/bold]       Show this help\n"
+            "  [bold]quit[/bold]       Exit Aletheia"
+        )
+        ui.console.print(RichPanel(body, title="[bold]Commands[/bold]",
+                                   border_style="cyan", padding=(1, 2)))
+    else:
+        print("\n--- Commands ---")
+        print("  After a verdict:")
+        print("    details    Full breakdown — caveats, data sources, routing, AI reasoning")
+        print("    trail      List all documents and data used as evidence")
+        print("    trail 3    Inspect a specific evidence document by number")
+        print("    trace      See how the AI agents communicated internally")
+        print("  Re-analyze:")
+        print("    !rerun     Re-analyze the last claim")
+        print("    !deep      Re-analyze with deeper research")
+        print("    !deep on   Always use deep research for future claims")
+        print("    !deep off  Return to normal research depth")
+        print("  Session:")
+        print("    !mode      Show current settings")
+        print("    help       Show this help")
+        print("    quit       Exit Aletheia")
+        print("---")
+
+
+def _render_verdict(ui: TerminalUI, verdict, *, verbose: bool = False) -> None:
+    """Render verdict — compact by default, full detail when verbose=True."""
+    if ui._enabled and ui.console:
+        _render_verdict_rich(ui, verdict, verbose=verbose)
+    else:
+        _render_verdict_plain(ui, verdict, verbose=verbose)
+
+
+def _render_verdict_rich(ui: TerminalUI, verdict, *, verbose: bool = False) -> None:
+    from rich.panel import Panel as RichPanel
+
+    status_str = ui.style_status(verdict.status.value)
+    conf_str = ui.style_confidence(verdict.confidence)
+    sev_str = ui.style_severity(verdict.severity.value)
+    comp_str = ui.style_comparability(verdict.comparability.value)
+    conf_bar = ui.confidence_bar(verdict.confidence)
+
+    # Status-aware border color
+    border = {"SUPPORTED": "green", "PARTIALLY_SUPPORTED": "yellow",
+              "MISLEADING": "red"}.get(verdict.status.value, "cyan")
+
+    lines = [
+        f"{status_str}  ({conf_str} confidence)    severity: {sev_str}",
+        f"comparability: {comp_str}",
+        f"confidence  {conf_bar}",
+        "",
+        f"{verdict.summary}",
+    ]
+
+    # Human-readable interpretation
+    interpretation = _verdict_interpretation(verdict.status.value, verdict.confidence)
+    if interpretation:
+        lines.append("")
+        lines.append(f"[dim italic]{interpretation}[/dim italic]")
+
+    # Top breaks (max 3 in compact, 5 in verbose)
+    if verdict.breaks_found:
+        limit = 5 if verbose else 3
+        lines.append("")
+        n = len(verdict.breaks_found)
+        lines.append(f"[bold]Detected {n} statistical methodology change(s):[/bold]")
+        for change in verdict.breaks_found[:limit]:
+            date_str = change.effective_date.isoformat() if change.effective_date else "unknown"
+            ctype = change.change_type.value.replace("_", " ")
+            impact = (change.impact_estimate or "")[:60]
+            lines.append(f"  {date_str}  [dim]{ctype}[/dim] — {impact}")
+        if n > limit:
+            lines.append(f"  [dim]... and {n - limit} more[/dim]")
+
+    # Decomposition bar (when available)
+    if verdict.methodology_vs_real:
+        mvr = verdict.methodology_vs_real
+        share = mvr.get("methodology_share_estimate")
+        if isinstance(share, (int, float)) and 0 < share < 1:
+            m_line, r_line = ui.decomposition_bar(share)
+            lines.append("")
+            lines.append("[bold]Change decomposition:[/bold]")
+            lines.append(f"  {m_line}")
+            lines.append(f"  {r_line}")
+
+    if not verbose:
+        lines.append("")
+        lines.append("[dim]Type 'details' for full analysis, 'trail' for evidence sources[/dim]")
+
+    body = "\n".join(lines)
+    assert ui.console is not None
+    ui.console.print(
+        RichPanel(
+            body,
+            title="[bold]Verdict[/bold]",
+            border_style=border,
+            expand=True,
+            padding=(1, 2),
+        )
     )
 
+    if verbose:
+        _render_verdict_detail_sections(ui, verdict)
+
+
+def _verdict_interpretation(status: str, confidence: float) -> str | None:
+    """Return a plain-English sentence explaining what the verdict means."""
+    if status == "SUPPORTED" and confidence >= 0.8:
+        return "The claim appears well-supported by the data, with no major methodology issues."
+    if status == "SUPPORTED":
+        return "The claim is supported, though confidence is moderate — some caveats may apply."
+    if status == "PARTIALLY_SUPPORTED":
+        return "Part of the claim checks out, but important nuances or methodology changes affect the full picture."
+    if status == "MISLEADING" and confidence >= 0.8:
+        return "The claim is likely misleading — methodology changes significantly distort the numbers being compared."
+    if status == "MISLEADING":
+        return "The claim appears misleading, though confidence is limited by available evidence."
+    if status == "INSUFFICIENT_DATA":
+        return "Not enough data was found to confidently verify or refute this claim."
+    return None
+
+
+def _render_verdict_plain(ui: TerminalUI, verdict, *, verbose: bool = False) -> None:
+    status = verdict.status.value
+    conf = f"{verdict.confidence:.0%}"
+    sev = verdict.severity.value
+    comp = verdict.comparability.value
+    conf_bar = ui.confidence_bar_plain(verdict.confidence)
+
+    print(f"\n--- Verdict ---")
+    print(f"  {status}  ({conf} confidence)    severity: {sev}")
+    print(f"  comparability: {comp}")
+    print(f"  confidence  {conf_bar}")
+    print(f"\n  {verdict.summary}")
+
+    interpretation = _verdict_interpretation(status, verdict.confidence)
+    if interpretation:
+        print(f"\n  {interpretation}")
+
+    if verdict.breaks_found:
+        limit = 5 if verbose else 3
+        n = len(verdict.breaks_found)
+        print(f"\n  Detected {n} statistical methodology change(s):")
+        for change in verdict.breaks_found[:limit]:
+            date_str = change.effective_date.isoformat() if change.effective_date else "unknown"
+            ctype = change.change_type.value.replace("_", " ")
+            impact = (change.impact_estimate or "")[:60]
+            print(f"    {date_str}  {ctype} — {impact}")
+        if n > limit:
+            print(f"    ... and {n - limit} more")
+
+    if not verbose:
+        print("\n  Type 'details' for full analysis, 'trail' for evidence sources")
+    else:
+        _render_verdict_detail_sections(ui, verdict)
+    print("---")
+
+
+def _render_verdict_detail_sections(ui: TerminalUI, verdict) -> None:
+    """Render the verbose sections: decomposition, caveats, sources, snippets."""
     if verdict.methodology_vs_real:
         mvr = verdict.methodology_vs_real
         ui.kv_table(
-            "Methodology vs Real (estimate)",
+            "Change Decomposition (estimate)",
             [
-                ("methodology_share", mvr.get("methodology_share_estimate")),
-                ("methodology_component", mvr.get("methodology_component_estimate")),
-                ("real_component", mvr.get("real_component_estimate")),
+                ("Methodology share", mvr.get("methodology_share_estimate")),
+                ("Methodology component", mvr.get("methodology_component_estimate")),
+                ("Real change component", mvr.get("real_component_estimate")),
             ],
         )
 
     if verdict.breaks_found:
         rows: list[list[str]] = []
-        for change in verdict.breaks_found[:5]:
-            rows.append(
-                [
-                    change.effective_date.isoformat() if change.effective_date else "unknown",
-                    change.change_type.value,
-                    (change.impact_estimate or "")[:80],
-                ]
-            )
-        ui.table("Methodology Breaks", ["Effective Date", "Type", "Impact"], rows)
+        for change in verdict.breaks_found:
+            rows.append([
+                change.effective_date.isoformat() if change.effective_date else "unknown",
+                change.change_type.value.replace("_", " "),
+                (change.impact_estimate or "")[:80],
+            ])
+        ui.table("All Methodology Changes", ["Date", "Type", "Impact"], rows)
 
     if verdict.caveats:
-        ui.bullet_list("Caveats", verdict.caveats)
+        ui.bullet_list("Caveats & Limitations", verdict.caveats)
 
     if verdict.sources:
-        ui.bullet_list("Top Sources", [str(source) for source in verdict.sources[:5]])
+        ui.bullet_list("Data Sources Used", [str(source) for source in verdict.sources[:5]])
 
     if verdict.evidence_snippets:
-        ui.bullet_list("Evidence Snippets", [str(item) for item in verdict.evidence_snippets[:3]])
+        ui.bullet_list("Key Evidence", [str(item) for item in verdict.evidence_snippets[:3]])
 
 
 def _render_run_details(ui: TerminalUI, run: dict[str, Any]) -> None:
     routing = run.get("routing_plan")
     if isinstance(routing, dict):
+        sources = routing.get("source_ids") or []
+        fallback = routing.get("fallback_source_id") or "none"
+        deep = routing.get("deep_research_source_ids") or []
         ui.kv_table(
-            "Routing Plan",
+            "How Aletheia Searched (Routing Plan)",
             [
-                ("claim_type", routing.get("claim_type")),
-                ("source_ids", routing.get("source_ids")),
-                ("fallback_source_id", routing.get("fallback_source_id")),
-                ("deep_research_source_ids", routing.get("deep_research_source_ids")),
+                ("Claim type", routing.get("claim_type")),
+                ("Sources queried", ", ".join(str(s) for s in sources) if sources else "none"),
+                ("Backup source", fallback),
+                ("Deep research sources", ", ".join(str(s) for s in deep) if deep else "none"),
             ],
         )
 
@@ -195,8 +380,8 @@ def _render_run_details(ui: TerminalUI, run: dict[str, Any]) -> None:
             )
         if rows:
             ui.table(
-                "Source Execution",
-                ["Source", "Docs", "Breaks", "Errors", "Top Error"],
+                "Source Results",
+                ["Source", "Documents", "Changes Found", "Errors", "Notes"],
                 rows,
             )
 
@@ -207,33 +392,36 @@ def _render_run_details(ui: TerminalUI, run: dict[str, Any]) -> None:
     structural_break = analysis.get("structural_break_detected") if isinstance(
         analysis.get("structural_break_detected"), dict
     ) else {}
-    ui.kv_table(
-        "Runtime Signals",
-        [
-            ("fallback_used", analysis.get("fallback_used", run.get("fallback_used"))),
-            (
-                "deep_research_used",
-                analysis.get("deep_research_used", run.get("deep_research_used")),
-            ),
-            (
-                "aggregate_confidence",
-                analysis.get(
-                    "evidence_aggregate_confidence",
-                    run.get("aggregate_confidence", 0.0),
-                ),
-            ),
-            ("claim_value_within_tolerance", claim_value_check.get("within_tolerance")),
-            ("claim_value_delta", claim_value_check.get("delta")),
-            ("structural_break_detected", structural_break.get("detected")),
-            ("provider_budget_skips", analysis.get("provider_budget_skips")),
-        ],
-    )
+
+    fallback_used = analysis.get("fallback_used", run.get("fallback_used"))
+    deep_used = analysis.get("deep_research_used", run.get("deep_research_used"))
+    agg_conf = analysis.get("evidence_aggregate_confidence", run.get("aggregate_confidence", 0.0))
+    within_tol = claim_value_check.get("within_tolerance")
+    delta = claim_value_check.get("delta")
+    struct_break = structural_break.get("detected")
+    budget_skips = analysis.get("provider_budget_skips")
+
+    signal_rows: list[tuple[str, Any]] = [
+        ("Used backup sources", "Yes" if fallback_used else "No"),
+        ("Used deep research", "Yes" if deep_used else "No"),
+        ("Overall evidence confidence", f"{float(agg_conf):.1%}" if agg_conf else "n/a"),
+    ]
+    if within_tol is not None:
+        signal_rows.append(("Claimed value matches data", "Yes" if within_tol else "No"))
+    if delta is not None:
+        signal_rows.append(("Difference from actual", str(delta)))
+    if struct_break is not None:
+        signal_rows.append(("Statistical break detected", "Yes" if struct_break else "No"))
+    if budget_skips:
+        signal_rows.append(("Sources skipped (budget limit)", str(budget_skips)))
+
+    ui.kv_table("Analysis Signals", signal_rows)
 
 
 def _render_evidence_trail(ui: TerminalUI, run: dict[str, Any]) -> None:
     docs = run.get("evidence_docs")
     if not isinstance(docs, list) or not docs:
-        ui.warning("No evidence trail captured yet.")
+        ui.warning("No evidence documents found yet. Run a claim first.")
         return
     rows = []
     for idx, row in enumerate(docs[:20], start=1):
@@ -248,40 +436,53 @@ def _render_evidence_trail(ui: TerminalUI, run: dict[str, Any]) -> None:
             [
                 idx,
                 row.get("source_id", "unknown"),
-                f"{conf_value:.3f}",
+                f"{conf_value:.0%}",
                 row.get("title", "Untitled"),
-                row.get("url", ""),
+                (row.get("url") or "")[:50],
             ]
         )
-    ui.table("Evidence Trail", ["#", "Source", "Confidence", "Title", "URL"], rows)
+    ui.table("Evidence Documents", ["#", "Source", "Relevance", "Title", "URL"], rows)
+    ui.hint("Type 'trail 3' to inspect document #3 in detail.")
 
 
 def _render_evidence_doc(ui: TerminalUI, run: dict[str, Any], index: int) -> None:
     docs = run.get("evidence_docs")
     if not isinstance(docs, list) or not docs:
-        ui.warning("No evidence docs available.")
+        ui.warning("No evidence documents available. Run a claim first.")
         return
     if index < 1 or index > len(docs):
-        ui.warning(f"Evidence index out of range. Choose 1..{len(docs)}.")
+        ui.warning(f"Document #{index} doesn't exist. Choose a number between 1 and {len(docs)}.")
         return
     doc = docs[index - 1]
     if not isinstance(doc, dict):
         ui.warning("Selected evidence entry is not structured.")
         return
+
+    raw_rel = doc.get("relevance_score", 0.0)
+    raw_conf = doc.get("confidence_score", 0.0)
+    try:
+        rel_str = f"{float(raw_rel):.0%}"
+    except (TypeError, ValueError):
+        rel_str = str(raw_rel)
+    try:
+        conf_str = f"{float(raw_conf):.0%}"
+    except (TypeError, ValueError):
+        conf_str = str(raw_conf)
+
     ui.kv_table(
-        f"Evidence #{index}",
+        f"Evidence Document #{index}",
         [
-            ("source_id", doc.get("source_id")),
-            ("title", doc.get("title")),
-            ("url", doc.get("url")),
-            ("relevance_score", doc.get("relevance_score")),
-            ("confidence_score", doc.get("confidence_score")),
+            ("Source", doc.get("source_id")),
+            ("Title", doc.get("title")),
+            ("URL", doc.get("url") or "n/a"),
+            ("Relevance", rel_str),
+            ("Confidence", conf_str),
         ],
     )
     content = str(doc.get("content") or "").strip()
     if content:
         preview = content[:1200] + ("..." if len(content) > 1200 else "")
-        ui.thinking_block(preview, collapsed_label="Evidence Content")
+        ui.thinking_block(preview, collapsed_label="Document Content")
 
 
 def _render_trace(ui: TerminalUI, trace: list[dict[str, Any]]) -> None:
@@ -293,42 +494,44 @@ def _render_trace(ui: TerminalUI, trace: list[dict[str, Any]]) -> None:
                 message.get("sender"),
                 message.get("receiver"),
                 message.get("msg_type"),
-                str(message.get("payload", ""))[:120],
+                str(message.get("payload", ""))[:100],
             ]
         )
     if rows:
-        ui.table("Recent Agent Trace", ["Time", "From", "To", "Type", "Payload"], rows)
+        ui.table("Agent Communication Log", ["Time", "From", "To", "Type", "Content"], rows)
+        ui.hint("This shows how the AI agents coordinated to analyze your claim.")
     else:
         ui.warning("No trace captured yet. Run a claim first.")
 
 
 def _render_retrieval_stats(ui: TerminalUI, stats: dict[str, Any]) -> None:
     if stats.get("error"):
-        ui.error(f"retrieval stats unavailable: {stats['error']}")
+        ui.error(f"Could not load retrieval stats: {stats['error']}")
         diagnosis = stats.get("diagnosis") or {}
         if diagnosis:
             ui.kv_table(
-                "DB Diagnostics",
-                [("db_url", diagnosis.get("db_url_redacted", "n/a"))],
+                "Connection Details",
+                [("Database address", diagnosis.get("db_url_redacted", "n/a"))],
             )
             hints = diagnosis.get("hints") or []
             if hints:
-                ui.bullet_list("Likely fixes", [str(hint) for hint in hints[:6]])
+                ui.bullet_list("How To Fix", [str(hint) for hint in hints[:6]])
         return
 
     summary = stats.get("summary") or {}
+    hours = stats.get("window_hours", 24)
     ui.kv_table(
-        f"Retrieval Summary (last {stats.get('window_hours')}h)",
+        f"Analysis History (last {hours} hours)",
         [
-            ("runs", summary.get("total_runs", 0)),
-            ("completed_runs", summary.get("completed_runs", 0)),
-            ("non_completed_runs", summary.get("non_completed_runs", 0)),
-            ("linked_docs", summary.get("linked_docs", 0)),
-            ("cache_hits", summary.get("cache_hits", 0)),
-            ("cache_hit_rate", f"{summary.get('cache_hit_rate', 0.0):.1%}"),
-            ("distinct_sources", summary.get("distinct_sources", 0)),
-            ("avg_aggregate_confidence", f"{summary.get('avg_aggregate_confidence', 0.0):.3f}"),
-            ("provider_budget_skips", summary.get("provider_budget_skips", 0)),
+            ("Claims analyzed", summary.get("total_runs", 0)),
+            ("Completed", summary.get("completed_runs", 0)),
+            ("Incomplete", summary.get("non_completed_runs", 0)),
+            ("Evidence documents found", summary.get("linked_docs", 0)),
+            ("Cached results reused", summary.get("cache_hits", 0)),
+            ("Cache hit rate", f"{summary.get('cache_hit_rate', 0.0):.1%}"),
+            ("Distinct data sources", summary.get("distinct_sources", 0)),
+            ("Average confidence", f"{summary.get('avg_aggregate_confidence', 0.0):.0%}"),
+            ("Sources skipped (budget)", summary.get("provider_budget_skips", 0)),
         ],
     )
 
@@ -339,11 +542,11 @@ def _render_retrieval_stats(ui: TerminalUI, stats: dict[str, Any]) -> None:
                 row.get("source_id"),
                 row.get("doc_count", 0),
                 row.get("cache_hits", 0),
-                row.get("avg_confidence", 0.0),
+                f"{float(row.get('avg_confidence', 0.0)):.0%}",
             ]
             for row in source_rows[:12]
         ]
-        ui.table("By Source", ["Source", "Docs", "Cache Hits", "Avg Confidence"], rows)
+        ui.table("Results By Source", ["Source", "Documents", "Cached", "Avg Confidence"], rows)
 
     recent_runs = stats.get("recent_runs") or []
     if recent_runs:
@@ -354,26 +557,15 @@ def _render_retrieval_stats(ui: TerminalUI, stats: dict[str, Any]) -> None:
                 row.get("claim_indicator") or "unknown",
                 row.get("status"),
                 row.get("evidence_count", 0),
-                row.get("fallback_used"),
-                row.get("deep_research_used"),
-                row.get("provider_budget_skips", 0),
-                f"{float(row.get('aggregate_confidence', 0.0)):.3f}",
+                "Yes" if row.get("fallback_used") else "No",
+                "Yes" if row.get("deep_research_used") else "No",
+                f"{float(row.get('aggregate_confidence', 0.0)):.0%}",
             ]
             for row in recent_runs
         ]
         ui.table(
-            "Recent Runs",
-            [
-                "ID",
-                "Dataset",
-                "Indicator",
-                "Status",
-                "Evidence",
-                "Fallback",
-                "Deep",
-                "Budget Skips",
-                "Confidence",
-            ],
+            "Recent Analyses",
+            ["ID", "Dataset", "Indicator", "Status", "Evidence", "Backup Used", "Deep", "Confidence"],
             rows,
         )
 
@@ -652,14 +844,22 @@ async def _safe_llm_check(timeout_seconds: float = 15.0) -> dict[str, Any]:
 async def interactive_mode(ui: TerminalUI):
     """Run interactive CLI session."""
     ui.banner(
-        "ALETHEIA CLI",
+        "ALETHEIA — Policy Claim Analyzer",
         (
-            "Type a policy claim to analyze.\n"
-            "Built-in commands: help, trace, details, trail, !deep, !rerun, quit"
+            "Enter a policy claim and Aletheia will check it against official data,\n"
+            "detect methodology changes, and tell you how trustworthy the numbers are.\n\n"
+            "  Example: \"The US poverty rate increased by 3% in 2020\"\n\n"
+            "Type [bold]help[/bold] for commands, or just type a claim to get started."
+            if ui._enabled else
+            "Enter a policy claim and Aletheia will check it against official data,\n"
+            "detect methodology changes, and tell you how trustworthy the numbers are.\n\n"
+            "  Example: \"The US poverty rate increased by 3% in 2020\"\n\n"
+            "Type 'help' for commands, or just type a claim to get started."
         ),
     )
     orchestrator = OrchestratorAgent()
     last_claim: str | None = None
+    last_verdict = None
     persistent_deep = False
 
     def _runtime_overrides(*, force_deep: bool) -> dict[str, str] | None:
@@ -667,62 +867,25 @@ async def interactive_mode(ui: TerminalUI):
             return None
         return {"ALETHEIA_ENABLE_DEEP_RESEARCH": "1"}
 
-    def _progress(event: dict[str, Any]) -> None:
-        kind = event.get("event")
-        if kind == "parser_started":
-            ui.info("Pipeline: parsing claim...")
-            return
-        if kind == "routing_selected":
-            sources = event.get("source_ids") or []
-            ui.info(f"Pipeline: routed to sources {sources}")
-            return
-        if kind == "source_started":
-            ui.info(f"Pipeline: running source `{event.get('source_id')}`...")
-            return
-        if kind == "source_completed":
-            ui.info(
-                (
-                    f"Pipeline: `{event.get('source_id')}` done "
-                    f"(docs={event.get('doc_count', 0)}, breaks={event.get('break_count', 0)}, "
-                    f"errors={event.get('error_count', 0)})"
-                )
-            )
-            return
-        if kind == "editor_started":
-            ui.info("Pipeline: synthesizing verdict...")
-            return
-        if kind == "collection_completed":
-            ui.info(
-                (
-                    "Pipeline: evidence collection complete "
-                    f"(docs={event.get('evidence_count', 0)}, breaks={event.get('break_count', 0)}, "
-                    f"confidence={event.get('aggregate_confidence', 0.0)})"
-                )
-            )
-
     async def _run_claim_text(text: str, *, force_deep: bool) -> None:
-        nonlocal last_claim
+        nonlocal last_claim, last_verdict
         mode_note = "deep-on" if force_deep else "deep-auto"
         ui.info(f"Analyzing claim ({mode_note})...")
-        verdict = await orchestrator.process_claim(
-            text,
-            runtime_overrides=_runtime_overrides(force_deep=force_deep),
-            progress_callback=_progress,
-        )
-        run = orchestrator.get_last_run_details()
+
+        spinner = ui.create_spinner()
+        spinner.start()
+        try:
+            verdict = await orchestrator.process_claim(
+                text,
+                runtime_overrides=_runtime_overrides(force_deep=force_deep),
+                progress_callback=spinner.update,
+            )
+        finally:
+            spinner.stop()
+
         _render_verdict(ui, verdict)
-        _render_run_details(ui, run)
-        thinking_blocks = run.get("thinking_blocks")
-        if isinstance(thinking_blocks, list):
-            for block in thinking_blocks:
-                if not isinstance(block, dict):
-                    continue
-                content = str(block.get("text") or "").strip()
-                if not content:
-                    continue
-                agent = str(block.get("agent") or "LLM")
-                ui.thinking_block(content, collapsed_label=f"{agent} Reasoning")
         last_claim = text
+        last_verdict = verdict
 
     try:
         while True:
@@ -736,34 +899,32 @@ async def interactive_mode(ui: TerminalUI):
             if claim.lower() in {"quit", "exit", "q"}:
                 break
             if claim.lower() == "help":
-                ui.bullet_list(
-                    "Interactive Commands",
-                    [
-                        "help: show commands",
-                        "trace: show latest inter-agent trace",
-                        "details: show latest routing/source runtime details",
-                        "trail: list current evidence trail",
-                        "trail <n>: inspect one evidence item",
-                        "!deep: rerun last claim with deep research forced once",
-                        "!deep on|off: toggle persistent deep mode for future claims",
-                        "!rerun: rerun last claim with current mode",
-                        "!mode: show current interactive mode",
-                        "quit: exit session",
-                    ],
-                )
+                _render_help(ui)
                 continue
             if claim.lower() == "trace":
                 _render_trace(ui, orchestrator.get_trace())
                 continue
             if claim.lower() == "details":
-                _render_run_details(ui, orchestrator.get_last_run_details())
+                run = orchestrator.get_last_run_details()
+                if last_verdict is not None:
+                    _render_verdict_detail_sections(ui, last_verdict)
+                _render_run_details(ui, run)
+                thinking_blocks = run.get("thinking_blocks")
+                if isinstance(thinking_blocks, list):
+                    for block in thinking_blocks:
+                        if not isinstance(block, dict):
+                            continue
+                        content = str(block.get("text") or "").strip()
+                        if content:
+                            agent = str(block.get("agent") or "LLM")
+                            ui.thinking_block(content, collapsed_label=f"{agent} Reasoning")
                 continue
             if claim.lower() == "!mode":
                 ui.kv_table(
-                    "Interactive Mode",
+                    "Current Settings",
                     [
-                        ("persistent_deep", persistent_deep),
-                        ("last_claim_available", bool(last_claim)),
+                        ("Deep research", "Always on" if persistent_deep else "Auto (normal)"),
+                        ("Last claim", last_claim[:60] + "..." if last_claim and len(last_claim) > 60 else (last_claim or "none")),
                     ],
                 )
                 continue
@@ -820,20 +981,31 @@ async def single_claim(
     """Process a single claim and exit."""
     orchestrator = OrchestratorAgent()
     try:
-        verdict = await orchestrator.process_claim(claim)
+        spinner = ui.create_spinner()
+        spinner.start()
+        try:
+            verdict = await orchestrator.process_claim(
+                claim,
+                progress_callback=spinner.update,
+            )
+        finally:
+            spinner.stop()
+
         _render_verdict(ui, verdict)
         run = orchestrator.get_last_run_details()
-        _render_run_details(ui, run)
-        thinking_blocks = run.get("thinking_blocks")
-        if isinstance(thinking_blocks, list):
-            for block in thinking_blocks:
-                if not isinstance(block, dict):
-                    continue
-                text = str(block.get("text") or "").strip()
-                if text:
-                    ui.thinking_block(text, collapsed_label=f"{block.get('agent', 'LLM')} Reasoning")
+
         if show_trace:
+            _render_run_details(ui, run)
             _render_trace(ui, orchestrator.get_trace())
+            thinking_blocks = run.get("thinking_blocks")
+            if isinstance(thinking_blocks, list):
+                for block in thinking_blocks:
+                    if not isinstance(block, dict):
+                        continue
+                    text = str(block.get("text") or "").strip()
+                    if text:
+                        ui.thinking_block(text, collapsed_label=f"{block.get('agent', 'LLM')} Reasoning")
+
         if show_json:
             print(verdict.model_dump_json(indent=2))
     finally:
@@ -868,16 +1040,16 @@ def _render_profile_context(ui: TerminalUI, resolved_profile: ResolvedRuntimePro
     if resolved_profile is None:
         return
     ui.kv_table(
-        "Runtime Profile",
+        "Configuration",
         [
-            ("name", resolved_profile.name),
-            ("profile_file", resolved_profile.profile_file or "(built-in defaults)"),
+            ("Profile", resolved_profile.name),
+            ("Config file", resolved_profile.profile_file or "(built-in defaults)"),
             (
-                "chat_endpoint",
+                "AI model server",
                 f"{os.environ.get('ALETHEIA_LLM_BASE_URL')} ({resolved_profile.source_for('ALETHEIA_LLM_BASE_URL')})",
             ),
             (
-                "embedding_endpoint",
+                "Embedding server",
                 f"{os.environ.get('ALETHEIA_EMBED_BASE_URL', os.environ.get('ALETHEIA_LLM_BASE_URL', 'n/a'))} "
                 f"({resolved_profile.source_for('ALETHEIA_EMBED_BASE_URL')})",
             ),
@@ -908,37 +1080,51 @@ async def show_db_doctor(
     _render_profile_context(ui, resolved_profile)
     result = await _safe_db_check()
     if result.get("ok"):
-        ui.success("DB connection OK")
+        counts = result.get("counts") or {}
+        semantic = result.get("semantic_search_ready")
+
+        status_lines = [
+            ui.status_dot(True, "Connection", result.get("db_url_redacted", "")),
+            ui.status_dot(bool(result.get("pgvector_enabled")), "Vector search extension"),
+            ui.status_dot(bool(result.get("pgai_installed")), "AI extension"),
+            ui.status_dot(bool(semantic), "Knowledge search ready"),
+        ]
+
+        if ui._enabled and ui.console:
+            from rich.panel import Panel as RichPanel
+            body = "\n".join(status_lines)
+            ui.console.print(RichPanel(body, title="[bold]Database Health[/bold]",
+                                       border_style="green", padding=(1, 2)))
+        else:
+            print("\n--- Database Health ---")
+            for line in status_lines:
+                print(f"  {line}")
+            print("---")
+
         ui.kv_table(
-            "Database Health",
+            "Knowledge Base Contents",
             [
-                ("db_url", result.get("db_url_redacted")),
-                ("pgvector", result.get("pgvector_enabled")),
-                ("pgai", result.get("pgai_installed")),
-                ("semantic_search_ready", result.get("semantic_search_ready")),
-                ("methodology_changes", (result.get("counts") or {}).get("methodology_changes", 0)),
-                ("document_chunks", (result.get("counts") or {}).get("document_chunks", 0)),
-                ("methodology_embeddings", (result.get("counts") or {}).get("methodology_embeddings", 0)),
-                ("document_embeddings", (result.get("counts") or {}).get("document_embeddings", 0)),
-                ("tables", len(result.get("tables") or [])),
+                ("Known statistical changes", counts.get("methodology_changes", 0)),
+                ("Research documents", counts.get("document_chunks", 0)),
+                ("Searchable change records", counts.get("methodology_embeddings", 0)),
+                ("Searchable document records", counts.get("document_embeddings", 0)),
+                ("Total tables", len(result.get("tables") or [])),
             ],
         )
-        _render_capabilities(ui)
         return 0
 
-    ui.error("DB connection FAILED")
+    ui.error("Database connection failed")
     ui.kv_table(
-        "Failure Details",
+        "Connection Details",
         [
-            ("db_url", result.get("db_url_redacted", "n/a")),
-            ("category", result.get("category", "unknown")),
-            ("error", result.get("message", "n/a")),
+            ("Address", result.get("db_url_redacted", "n/a")),
+            ("Problem type", result.get("category", "unknown")),
+            ("Error message", result.get("message", "n/a")),
         ],
     )
     hints = [str(hint) for hint in (result.get("hints") or [])[:8]]
     if hints:
-        ui.bullet_list("Likely fixes", hints)
-    _render_capabilities(ui)
+        ui.bullet_list("How To Fix", hints)
     return 2
 
 
@@ -960,127 +1146,140 @@ async def show_onboarding(
     embed_diag = (
         llm_result.get("embeddings") if isinstance(llm_result.get("embeddings"), dict) else {}
     )
+    all_ok = db_ok and chat_ok and embed_ok and semantic_ok
 
     ui.banner(
-        "ALETHEIA Onboarding",
+        "ALETHEIA — System Check",
         (
-            "Local-first system check for stable Phase 3 foundations.\n"
-            f"TUI mode: {ui.state.reason}"
+            "Checking that all components are running and properly configured.\n"
+            "Aletheia needs a database, an AI model, and an embedding model to work."
         ),
     )
-    _render_profile_context(ui, resolved_profile)
 
-    ui.table(
-        "Critical Subsystems",
-        ["Component", "State", "Details"],
-        [
-            [
-                "database",
-                "ready" if db_ok else "not ready",
-                db_result.get("db_url_redacted", "n/a"),
-            ],
-            [
-                "llm_chat",
-                "ready" if chat_ok else "not ready",
-                chat_diag.get("endpoint", "n/a"),
-            ],
-            [
-                "embeddings",
-                "ready" if embed_ok else "not ready",
-                embed_diag.get("endpoint", "n/a"),
-            ],
-            [
-                "semantic_search",
-                "ready" if semantic_ok else "not ready",
-                (
-                    "document_chunks_embedding + methodology_changes_embedding available"
-                    if semantic_ok
-                    else "run vectorizer/materialization"
-                ),
-            ],
-        ],
-    )
+    # -- Section 1: System Status Overview ---------------------------------
+    status_lines = [
+        ui.status_dot(db_ok, "Database", db_result.get("db_url_redacted", "")),
+        ui.status_dot(chat_ok, "AI Chat Model", chat_diag.get("endpoint", "")),
+        ui.status_dot(embed_ok, "Embedding Model", embed_diag.get("endpoint", "")),
+        ui.status_dot(semantic_ok, "Knowledge Search",
+                      "ready" if semantic_ok else "needs embedding setup"),
+    ]
 
+    if ui._enabled and ui.console:
+        from rich.panel import Panel as RichPanel
+        overall = "[bold green]All systems ready[/bold green]" if all_ok else "[bold yellow]Some components need attention[/bold yellow]"
+        body = "\n".join(status_lines) + f"\n\n{overall}"
+        ui.console.print(RichPanel(body, title="[bold]System Status[/bold]",
+                                   border_style="green" if all_ok else "yellow",
+                                   padding=(1, 2)))
+    else:
+        print("\n--- System Status ---")
+        for line in status_lines:
+            print(f"  {line}")
+        print(f"\n  {'All systems ready' if all_ok else 'Some components need attention'}")
+        print("---")
+
+    # -- Section 2: Knowledge Base (when DB is connected) ------------------
     counts = db_result.get("counts") if isinstance(db_result.get("counts"), dict) else {}
     if db_ok and counts:
         ui.kv_table(
-            "Knowledge Base Coverage",
+            "Knowledge Base",
             [
-                ("methodology_changes", counts.get("methodology_changes", 0)),
-                ("document_chunks", counts.get("document_chunks", 0)),
-                ("methodology_embeddings", counts.get("methodology_embeddings", 0)),
-                ("document_embeddings", counts.get("document_embeddings", 0)),
+                ("Known statistical changes", counts.get("methodology_changes", 0)),
+                ("Research documents", counts.get("document_chunks", 0)),
+                ("Searchable change records", counts.get("methodology_embeddings", 0)),
+                ("Searchable document records", counts.get("document_embeddings", 0)),
             ],
         )
 
-    chat_errors = [
-        str(err).strip()
-        for err in (chat_diag.get("errors") or [])[:6]
-        if str(err).strip()
-    ]
-    chat_hints = [
-        str(hint).strip()
-        for hint in (chat_diag.get("hints") or [])[:6]
-        if str(hint).strip()
-    ]
-    if chat_errors or chat_hints:
-        ui.bullet_list(
-            "LLM Chat Diagnostics",
-            [*chat_errors, *chat_hints],
-        )
+    # -- Section 3: Diagnostics (only when something is wrong) -------------
+    _render_onboarding_diagnostics(ui, chat_ok=chat_ok, embed_ok=embed_ok, db_ok=db_ok,
+                                   chat_diag=chat_diag, embed_diag=embed_diag,
+                                   db_result=db_result)
 
-    embed_errors = [
-        str(err).strip()
-        for err in (embed_diag.get("errors") or [])[:6]
-        if str(err).strip()
+    # -- Section 4: Optional Enhancements ----------------------------------
+    key_rows = _optional_key_status()
+    has_optional = any(ready for _, ready, _ in key_rows)
+
+    _FRIENDLY_KEY_NAMES = {
+        "BRAVE_SEARCH_API_KEY": "Brave Web Search",
+        "FRED_API_KEY": "FRED Economic Data",
+        "CENSUS_API_KEY": "US Census Bureau",
+        "GOOGLE_CSE_API_KEY + GOOGLE_CSE_CX": "Google Custom Search",
+        "SERPAPI_API_KEY": "Scholar Deep Research",
+    }
+    opt_rows = [
+        [_FRIENDLY_KEY_NAMES.get(name, name),
+         "Active" if ready else "Not configured",
+         note]
+        for name, ready, note in key_rows
     ]
-    embed_hints = [
-        str(hint).strip()
-        for hint in (embed_diag.get("hints") or [])[:6]
-        if str(hint).strip()
-    ]
-    if chat_ok and not embed_ok and bool(embed_diag.get("unsupported")):
-        embed_hints.insert(
-            0,
-            "Chat is reachable but embeddings are unsupported on this endpoint; configure a different embedding endpoint/model.",
-        )
-    if not embed_ok and not embed_errors and not embed_hints:
-        embed_hints.append(
-            "Embedding probe failed without detailed server message; verify embedding model is loaded and /v1/embeddings is enabled."
-        )
-    if embed_errors or embed_hints:
-        ui.bullet_list(
-            "Embedding Diagnostics",
-            [*embed_errors, *embed_hints],
-        )
+    ui.table("Optional Data Sources (not required)", ["Feature", "Status", "What It Adds"], opt_rows)
+
+    # -- Section 5: What To Do Next ----------------------------------------
+    if all_ok:
+        next_steps = [
+            "You're all set! Try analyzing a claim:",
+            "  uv run python cli.py claim \"The US poverty rate increased by 3% in 2020\"",
+            "Or start an interactive session:",
+            "  uv run python cli.py interactive",
+        ]
+    else:
+        next_steps = []
+        if not db_ok:
+            next_steps.append("Start the database: docker compose up -d")
+            next_steps.append("Then re-run: uv run python cli.py onboarding")
+        if not chat_ok:
+            next_steps.append("Start your AI model server (LM Studio or Ollama)")
+            next_steps.append("Load a chat model, then re-run this check")
+        if not embed_ok:
+            next_steps.append("Load an embedding model (e.g., qwen3-embedding in Ollama)")
+        if db_ok and not semantic_ok:
+            next_steps.append("Build the knowledge base:")
+            next_steps.append("  uv run python -m aletheia.ingest --seed-phase3 --materialize-embeddings")
+
+    ui.bullet_list("Next Steps", next_steps)
+
+    return 0 if all_ok else 2
+
+
+def _render_onboarding_diagnostics(
+    ui: TerminalUI, *, chat_ok: bool, embed_ok: bool, db_ok: bool,
+    chat_diag: dict, embed_diag: dict, db_result: dict,
+) -> None:
+    """Render diagnostic details only for components that need attention."""
+    if chat_ok and embed_ok and db_ok:
+        return
+
+    issues: list[str] = []
+
+    if not chat_ok:
+        chat_errors = [str(e).strip() for e in (chat_diag.get("errors") or [])[:3] if str(e).strip()]
+        chat_hints = [str(h).strip() for h in (chat_diag.get("hints") or [])[:3] if str(h).strip()]
+        if chat_errors:
+            issues.append(f"AI Chat Model: {chat_errors[0]}")
+        for h in chat_hints:
+            issues.append(f"  Fix: {h}")
+
+    if not embed_ok:
+        embed_errors = [str(e).strip() for e in (embed_diag.get("errors") or [])[:3] if str(e).strip()]
+        embed_hints = [str(h).strip() for h in (embed_diag.get("hints") or [])[:3] if str(h).strip()]
+        if chat_ok and bool(embed_diag.get("unsupported")):
+            issues.append("Embedding Model: Chat works but this server doesn't support embeddings")
+            issues.append("  Fix: Point ALETHEIA_EMBED_BASE_URL to an embedding-capable server")
+        elif embed_errors:
+            issues.append(f"Embedding Model: {embed_errors[0]}")
+        for h in embed_hints:
+            issues.append(f"  Fix: {h}")
 
     if not db_ok:
-        db_hints = [str(hint) for hint in (db_result.get("hints") or [])[:6]]
-        if db_hints:
-            ui.bullet_list("DB fixes", db_hints)
+        db_hints = [str(h) for h in (db_result.get("hints") or [])[:3]]
+        issues.append(f"Database: {db_result.get('message', 'connection failed')}")
+        for h in db_hints:
+            issues.append(f"  Fix: {h}")
 
-    key_rows = _optional_key_status()
-    ui.table(
-        "Optional Keys (Non-blocking)",
-        ["Key", "State", "Impact"],
-        [
-            [name, "present" if ready else "missing", note]
-            for name, ready, note in key_rows
-        ],
-    )
-
-    _render_capabilities(ui)
-
-    next_steps = [
-        "Run `uv run python cli.py db-doctor` after DB credential/volume fixes.",
-        "Run `uv run python cli.py onboarding` after starting your local model runtime and loading models.",
-        "Run `uv run python -m aletheia.ingest --seed-phase3 --fetch-urls --materialize-embeddings` to build the expanded Phase 3 KB.",
-        "Run `uv run python -m aletheia.vectorizer` to create/refresh semantic embedding views.",
-        "Use `uv run python demo.py --quick --assert-phase2` for strict demo contract checks.",
-    ]
-    ui.bullet_list("Next steps", next_steps)
-
-    return 0 if (db_ok and chat_ok and embed_ok and semantic_ok) else 2
+    if issues:
+        ui.bullet_list("Issues Found", issues)
 
 
 def _build_parser() -> argparse.ArgumentParser:
