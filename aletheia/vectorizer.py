@@ -110,12 +110,17 @@ def create_vectorizers():
     print("Views available: document_chunks_embedding, methodology_changes_embedding")
 
 
-def materialize_embeddings_once(timeout_seconds: int = 240) -> dict[str, object]:
+def materialize_embeddings_once(timeout_seconds: int = 600) -> dict[str, object]:
     """Run one vectorizer-worker pass to materialize pending embeddings."""
+    db_url = get_db_url()
     commands = [
-        ["pgai", "vectorizer", "worker", "--once"],
-        [sys.executable, "-m", "pgai.vectorizer_worker", "--once"],
+        ["pgai", "vectorizer", "worker", "--once", "--db-url", db_url],
+        [sys.executable, "-m", "pgai.vectorizer_worker", "--once", "--db-url", db_url],
     ]
+    # pgai requires OPENAI_API_KEY even for local Ollama endpoints.
+    env = {**os.environ}
+    if not env.get("OPENAI_API_KEY"):
+        env["OPENAI_API_KEY"] = "ollama-local"
     attempts: list[dict[str, object]] = []
 
     for cmd in commands:
@@ -126,6 +131,7 @@ def materialize_embeddings_once(timeout_seconds: int = 240) -> dict[str, object]
                 text=True,
                 timeout=timeout_seconds,
                 check=False,
+                env=env,
             )
         except FileNotFoundError as exc:
             attempts.append(
