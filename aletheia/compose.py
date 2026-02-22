@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CORE_COMPOSE_FILE = "docker-compose.core.yml"
+CORE_COMPOSE_FILE = "docker-compose.yml"
 CRAWLER_COMPOSE_FILE = "docker-compose.crawler.yml"
 LOCAL_OLLAMA_COMPOSE_FILE = "docker-compose.local-ollama.yml"
 

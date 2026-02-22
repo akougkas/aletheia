@@ -112,17 +112,6 @@ def get_db_url(*, redacted: bool = False) -> str:
     return get_db_settings().dsn(redacted=redacted)
 
 
-# Backward-compatible module constant used by existing imports.
-DB_URL = get_db_url()
-
-
-def refresh_db_url_alias() -> str:
-    """Refresh backward-compatible DB_URL alias after env/profile changes."""
-    global DB_URL
-    DB_URL = get_db_url()
-    return DB_URL
-
-
 def diagnose_connection_failure(exc: BaseException) -> dict[str, Any]:
     """Return actionable diagnosis hints for DB connection failures."""
     msg = str(exc)

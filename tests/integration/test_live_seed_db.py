@@ -5,7 +5,7 @@ import psycopg
 import pytest
 
 from aletheia.agents.archivist import ArchivistAgent
-from aletheia.db import DB_URL
+from aletheia.db import get_db_url
 from aletheia.ingest import ingest_marina_corpus
 from aletheia.schema import Direction, PolicyClaim
 
@@ -16,7 +16,7 @@ RUN_INTEGRATION = os.environ.get("ALETHEIA_RUN_INTEGRATION", "0") == "1"
 
 def _db_available() -> bool:
     try:
-        with psycopg.connect(DB_URL) as conn:
+        with psycopg.connect(get_db_url()) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
                 cur.fetchone()
@@ -30,12 +30,12 @@ def seeded_db():
     if not RUN_INTEGRATION:
         pytest.skip("Set ALETHEIA_RUN_INTEGRATION=1 to run integration tests.")
     if not _db_available():
-        pytest.skip(f"Live Postgres not available at {DB_URL}.")
+        pytest.skip(f"Live Postgres not available at {get_db_url()}.")
 
     seed_sql = (ROOT / "sql" / "seed_cases.sql").read_text(encoding="utf-8")
     validate_sql = (ROOT / "sql" / "validate_seed_cases.sql").read_text(encoding="utf-8")
 
-    with psycopg.connect(DB_URL) as conn:
+    with psycopg.connect(get_db_url()) as conn:
         with conn.cursor() as cur:
             cur.execute(seed_sql)
             cur.execute(validate_sql)
@@ -47,7 +47,7 @@ def seeded_db():
 
 @pytest.mark.integration
 def test_seeded_benchmark_count(seeded_db):
-    with psycopg.connect(DB_URL) as conn:
+    with psycopg.connect(get_db_url()) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -62,7 +62,7 @@ def test_seeded_benchmark_count(seeded_db):
 
 @pytest.mark.integration
 def test_seeded_cases_have_indicator_links(seeded_db):
-    with psycopg.connect(DB_URL) as conn:
+    with psycopg.connect(get_db_url()) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -78,7 +78,7 @@ def test_seeded_cases_have_indicator_links(seeded_db):
 
 @pytest.mark.integration
 def test_ingested_marina_chunks_exist(seeded_db):
-    with psycopg.connect(DB_URL) as conn:
+    with psycopg.connect(get_db_url()) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """

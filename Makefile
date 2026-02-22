@@ -4,7 +4,7 @@ SHELL := /bin/bash
 UV ?= uv
 PY ?= $(UV) run python
 PROFILE ?= zbook-single
-COMPOSE_FILES ?= -f docker-compose.core.yml
+COMPOSE_FILES ?=
 UV_CACHE_DIR ?= /tmp/uv-cache
 export UV_CACHE_DIR
 
@@ -22,7 +22,7 @@ help:
 	@echo "  make doctor             - run db-doctor (PROFILE=<profile>)"
 	@echo "  make demo               - run quick demo"
 	@echo "  make demo-assert        - run strict phase-2 demo assertions"
-	@echo "  make compose-up         - start compose stack (COMPOSE_FILES='-f docker-compose.core.yml ...')"
+	@echo "  make compose-up         - start compose stack (COMPOSE_FILES='-f docker-compose.yml -f docker-compose.crawler.yml')"
 	@echo "  make compose-down       - stop compose stack"
 
 sync:

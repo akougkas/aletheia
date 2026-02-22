@@ -23,11 +23,6 @@ PROFILE_DEFAULTS: dict[str, dict[str, str]] = {
         "ALETHEIA_WEB_RATE_LIMIT_PER_MIN": "brave:30,duckduckgo:40,google:0,serpapi_google_scholar:0",
         "ALETHEIA_ENABLE_DEEP_RESEARCH": "0",
         "ALETHEIA_SOURCE_BUDGET_PER_RUN": _BASE_SOURCE_BUDGET,
-        "ALETHEIA_DB_HOST": "localhost",
-        "ALETHEIA_DB_PORT": "5433",
-        "ALETHEIA_DB_NAME": "aletheia",
-        "ALETHEIA_DB_USER": "aletheia",
-        "ALETHEIA_DB_PASSWORD": "aletheia",
     },
     "homelab-dev": {
         "ALETHEIA_LLM_BASE_URL": "http://127.0.0.1:11434",
@@ -45,11 +40,6 @@ PROFILE_DEFAULTS: dict[str, dict[str, str]] = {
         "ALETHEIA_ENABLE_DEEP_RESEARCH": "0",
         # Keep blade AI services out of homelab routing defaults.
         "ALETHEIA_SOURCE_BUDGET_PER_RUN": _BASE_SOURCE_BUDGET,
-        "ALETHEIA_DB_HOST": "localhost",
-        "ALETHEIA_DB_PORT": "5432",
-        "ALETHEIA_DB_NAME": "aletheia",
-        "ALETHEIA_DB_USER": "aletheia",
-        "ALETHEIA_DB_PASSWORD": "aletheia",
     },
 }
 PROFILE_CHOICES = tuple(PROFILE_DEFAULTS.keys())
@@ -238,6 +228,15 @@ def resolve_runtime_profile(
         selected_profile_file = str(path)
     else:
         selected_profile_file = None
+        # Auto-load .env from CWD when no explicit profile file is given
+        # and we're using real os.environ (not a synthetic test env).
+        if env is None:
+            dotenv_path = Path(".env")
+            if dotenv_path.exists():
+                dotenv_values = _parse_env_file(dotenv_path)
+                for key, value in dotenv_values.items():
+                    resolved_values[key] = value
+                    source_by_key[key] = "dotenv"
 
     # YAML config file (layered over profile file + defaults)
     resolved_config_file: str | None = None
@@ -313,17 +312,9 @@ def apply_runtime_profile(
         profile_file=profile_file,
         config_file=config_file,
         cli_overrides=cli_overrides,
-        env=os.environ,
     )
     for key, value in resolved.values.items():
         os.environ[key] = value
-    try:
-        from aletheia.db import refresh_db_url_alias
-
-        refresh_db_url_alias()
-    except ImportError:
-        # DB module may not be imported yet; skip best-effort alias sync.
-        pass
 
     # Register endpoints from YAML config if available
     _register_yaml_endpoints(resolved.config_file)

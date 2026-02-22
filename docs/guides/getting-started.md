@@ -17,14 +17,14 @@ ALETHEIA relies on `uv` for deterministic environment management. The `pyproject
 The platform requires a local PostgreSQL instance with `pgai` and `pgvector` extensions. The deployment topology is defined in stacked Compose files.
 
 **Stack Topologies**:
-1. **Core Database Only**: `docker-compose.core.yml` (Postgres on port `5432` by default).
+1. **Core Database Only**: `docker-compose.yml` (Postgres on port `5432` by default).
 2. **Web Crawler Addition**: `docker-compose.crawler.yml` (Adds Crawl4AI services).
 3. **Local LLM Addition**: `docker-compose.local-ollama.yml` (Adds Ollama for fully local embedding/chat).
 
 **Standard Invocation**:
 ```bash
-# Export ALETHEIA_DB_PORT if 5432 is occupied on the host
-docker compose -f docker-compose.core.yml up -d
+# Copy .env.example to .env; set ALETHEIA_DB_PORT=5433 if 5432 is occupied
+docker compose up -d
 ```
 
 ## 3. Database Bootstrap & Seeding

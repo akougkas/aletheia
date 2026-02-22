@@ -94,10 +94,10 @@ ALETHEIA is designed as a research tool that works in multiple environments (mac
 ```bash
 # Prerequisites: Docker, Python 3.11+, uv, local LLM endpoint (default: LM Studio/Ollama on localhost)
 
-# Optional if 5432 is busy on your machine:
-export ALETHEIA_DB_PORT=5433
+# Copy .env.example to .env; edit ALETHEIA_DB_PORT=5433 if 5432 is busy:
+cp .env.example .env
 
-docker compose -f docker-compose.core.yml up -d     # Start core stack (app + Postgres + vectorizer worker)
+docker compose up -d                                 # Start core stack (app + Postgres + vectorizer worker)
 uv sync                                              # Install core runtime dependencies
 uv run python -m aletheia.bootstrap         # Install pgai + seed + validate (no psql required)
 uv run python -m aletheia.ingest            # Ingest MARINA docs/papers into documents/chunks
@@ -155,28 +155,28 @@ uv run python demo.py --quick --llm-model your-chat-model-id
 
 ### Docker Compose Layers (Core + Optional)
 
-Core layer (default stack):
+Core layer (default stack — uses `docker-compose.yml` automatically):
 
 ```bash
-docker compose -f docker-compose.core.yml up -d
+docker compose up -d
 ```
 
 Core + crawler layer:
 
 ```bash
-docker compose -f docker-compose.core.yml -f docker-compose.crawler.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.crawler.yml up -d
 ```
 
 Core + local Ollama helper:
 
 ```bash
-docker compose -f docker-compose.core.yml -f docker-compose.local-ollama.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.local-ollama.yml up -d
 ```
 
 All layers:
 
 ```bash
-docker compose -f docker-compose.core.yml -f docker-compose.crawler.yml -f docker-compose.local-ollama.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.crawler.yml -f docker-compose.local-ollama.yml up -d
 ```
 
 By default, model runtimes remain external (host LM Studio/Ollama). `local-ollama` is opt-in only.
