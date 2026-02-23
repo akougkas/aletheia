@@ -20,7 +20,7 @@
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| PostgreSQL + pgvector + pgai | ✅ Done | Docker Compose with vectorizer worker |
+| SurrealDB (graph + vector + relational) | ✅ Done | Single container, HNSW vector indexes |
 | Database schema | ✅ Done | Agencies, datasets, indicators, methodology_changes, document_chunks |
 | LLM client | ✅ Done | OpenAI-compatible endpoints (LM Studio, Ollama) with provider abstraction |
 | Claim Parser agent | ✅ Done | Extracts structured claims from natural language |

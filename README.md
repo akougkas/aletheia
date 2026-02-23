@@ -69,7 +69,7 @@ ALETHEIA catches these breaks because it reads methodology documentation, retrie
 
 The current version demonstrates:
 - Claim parsing (natural language → structured query)
-- Knowledge base with 408 document chunks + 50 methodology changes (pgai-managed 4096-dim vector embeddings)
+- Knowledge base with 408 document chunks + 50 methodology changes (HNSW-indexed 4096-dim vector embeddings on SurrealDB)
 - 5 evidence sources: methodology KB, data APIs (BLS, FRED, Census ACS, Eurostat, ECB), document index, web fallback, scholar deep-research
 - Verdict synthesis with methodology-vs-real decomposition and Chow structural break detection
 - Color-coded interactive TUI with live pipeline spinner, confidence bars, and plain-English explanations
@@ -99,7 +99,7 @@ ALETHEIA is designed as a research tool that works in multiple environments (mac
 # Copy .env.example to .env; edit ALETHEIA_DB_PORT=5433 if 5432 is busy:
 cp .env.example .env
 
-docker compose up -d                                 # Start core stack (Postgres + vectorizer worker)
+docker compose up -d                                 # Start SurrealDB (graph + vector + relational)
 uv sync                                              # Install all runtime dependencies
 uv run aletheia onboarding                           # Verify DB, LLM, and embeddings are healthy
 uv run aletheia seed                                 # Load benchmark seed data + methodology breaks
@@ -157,7 +157,7 @@ uv run aletheia claim "EU unemployment fell in 2021" --llm-model your-chat-model
 
 ### Docker Compose (single file with profiles)
 
-Core stack (Postgres + vectorizer worker):
+Core stack (SurrealDB):
 
 ```bash
 docker compose up -d
@@ -307,12 +307,12 @@ uv run aletheia db-doctor
 `db-doctor` includes a capability matrix showing what is enabled by default (no-key baseline) versus optional API-key enhancements.
 
 Common local auth failure cause:
-- `password authentication failed` often means your Docker Postgres volume was initialized with older credentials.
-- `POSTGRES_USER` / `POSTGRES_PASSWORD` in `docker-compose.yml` only apply when the volume is first created.
+- `authentication failed` often means your Docker SurrealDB volume was initialized with older credentials.
+- `--user` / `--pass` in `docker-compose.yml` only apply when the volume is first created.
 
 Portable/safe configuration pattern:
-- Prefer a single `ALETHEIA_DB_URL` in your shell/CI secrets for production or remote DBs.
-- For local dev, use component env vars (`ALETHEIA_DB_HOST`, `ALETHEIA_DB_PORT`, `ALETHEIA_DB_NAME`, `ALETHEIA_DB_USER`, `ALETHEIA_DB_PASSWORD`) and keep them in a local `.env` (not committed).
+- Prefer `ALETHEIA_SURREAL_URL` in your shell/CI secrets for remote DBs.
+- For local dev, keep connection settings in a local `.env` (not committed).
 - Keep `ALETHEIA_DB_SSLMODE` explicit when using managed databases.
 - Keep local baseline defaults simple (`aletheia:aletheia`), then layer optional config only when needed.
 
